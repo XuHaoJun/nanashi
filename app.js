@@ -1,5 +1,7 @@
+var Promise  = require('bluebird');
 var _ = require('lodash');
 var is = require('is_js');
+var checkit = require('checkit');
 var killable = require('killable');
 var logger = require('morgan');
 var compress = require('compression');
@@ -55,18 +57,69 @@ var Card = bookshelf.Model.extend({
   }
 });
 
-var CardGroup = bookshelf.Model.extend({
-  tableName: 'card_group',
-  account: function() {
-    return this.belongsTo(Account, 'account_id');
+var CardParty = bookshelf.Model.extend({
+  tableName: 'card_party',
+  card: function() {
+    return this.belongsTo(Card, 'card_id');
   }
 });
 
+var CardPartyInfo = bookshelf.Model.extend({
+  tableName: 'card_party_info',
+  account: function() {
+    return this.belongsTo(Account, 'account_id');
+  },
+  cardParty: function() {
+    return this.hasMany(CardParty, 'id');
+  }
+});
+
+var AccountSaveRules = {
+  username: ['required', 'minLength:4', 'maxLength:24', function(val) {
+    return knex('account').where('username', '=', val).then(function(resp) {
+      if (resp.length > 0) throw new Error('The username is already in use.');
+    });
+  }],
+  password: ['required', 'minLength:4', 'maxLength:24'],
+  email: ['required', 'email', function(val) {
+    return knex('account').where('email', '=', val).then(function(resp) {
+      if (resp.length > 0) throw new Error('The email address is already in use.');
+    });
+  }]
+};
+
+var AccountAllRelation = ['deck',
+                          'deck.baseCard',
+                          'cardPartyInfo', 'cardPartyInfo.cardParty',
+                          'cardPartyInfo.cardParty.card',
+                          'cardPartyInfo.cardParty.card.baseCard'];
+
 var Account = bookshelf.Model.extend({
   tableName: 'account',
+  initialize: function() {
+    this.on('saving', this.validateSave);
+  },
+  validateSave: function() {
+    return checkit(AccountSaveRules).run(this.attributes);
+  },
   deck: function() {
     return this.hasMany(Card);
+  },
+  cardPartyInfo: function() {
+    return this.hasMany(CardPartyInfo, 'account_id');
   }
+}, {
+  login: Promise.method(function(username, password) {
+    var query = {username: username, password: password};
+    return new this(query)
+      .fetch({require: true,
+              withRelated: AccountAllRelation});
+  }),
+  loginBySession: Promise.method(function(accountId) {
+    return new this({id: accountId})
+      .fetch({require: true,
+              withRelated: AccountAllRelation});
+  })
 });
 
 apiRouter.get('/account/:id', function(req, res) {
@@ -77,67 +130,36 @@ apiRouter.get('/account/:id', function(req, res) {
   }
   Account
     .where({id: id})
-    .fetch({withRelated: ['deck', 'deck.baseCard']})
+    .fetch({withRelated: AccountAllRelation})
     .then(function(account) {
-      delete(account.password);
-      res.json(account);
+      res.json(account.omit('password'));
     }).catch(function (err) {
-      console.log(err);
-      res.json(null);
+      res.status(400).json({error: 'account get fail.'});
     });
 });
 
 apiRouter.post('/account/register', function(req, res) {
-  // TODO
-  // should validate and move save code check to model!
-  Account
-    .query({where: {username: req.body.username},
-            orWhere: {email: req.body.email}})
-    .fetch()
+  new Account(req.body).save()
     .then(function(account) {
-      if (account != null) {
-        console.log('already in db cant not add new account!');
-        res.json(null);
-        return;
-      }
-      new Account(req.body).save()
-        .then(function(account) {
-          account = account.toJSON();
-          delete(account.password);
-          req.session.accountId = account.id;
-          res.json(account);
-        }).catch(function(err) {
-          console.log('err', err);
-          res.json(null);
-        });
+      res.json(account.omit('password'));
     }).catch(function(err) {
-      res.json(null);
+      res.status(400).json({error: 'account register fail.'});
     });
 });
 
 apiRouter.post('/account/loginBySession', function(req, res) {
   var accountId = req.session.accountId;
   if (!is.existy(accountId)) {
-    res.json(null);
+    res.status(400).json({error: 'session id not found.'});
     return;
   }
-  Account
-    .where({id: accountId})
-    .fetch({withRelated: ['deck', 'deck.baseCard']})
+  Account.loginBySession(accountId)
     .then(function(account) {
-      if (!is.existy(account)) {
-        res.json(null);
-        return;
-      }
-      console.log('account.deck().toJSON()', account.deck().toJSON());
-      account = account.toJSON();
-      delete(account.password);
-      req.session.accountId = account.id;
-      console.log('account:', account);
-      res.json(account);
-    }).catch(function (err) {
-      console.log(err);
-      res.json(null);
+      res.json(account.omit('password'));
+    }).catch(Account.NotFoundError, function() {
+      res.status(400).json({error: 'account not found.'});
+    }).catch(function(err) {
+      console.error(err);
     });
 });
 
@@ -147,25 +169,15 @@ apiRouter.post('/account/logout', function(req, res) {
 });
 
 apiRouter.post('/account/login', function(req, res) {
-  // TODO check length
   var username = req.body.username;
   var password = req.body.password;
-  Account
-    .where({username: username, password: password})
-    .fetch({withRelated: ['deck', 'deck.baseCard']})
+  Account.login(username, password)
     .then(function(account) {
-      if (!is.existy(account)) {
-        res.json(null);
-        return;
-      }
-      account = account.toJSON();
-      delete(account.password);
-      req.session.accountId = account.id;
-      console.log('account:', account);
-      res.json(account);
-    }).catch(function (err) {
-      console.log(err);
-      res.json(null);
+      res.json(account.omit('password'));
+    }).catch(Account.NotFoundError, function() {
+      res.status(400).json({error: username + ' not found'});
+    }).catch(function(err) {
+      res.status(400).json({error: username + ' not found'});
     });
 });
 
@@ -173,7 +185,6 @@ app.use('/api', apiRouter);
 
 io.on('connection', function(socket){
   var accountId = socket.request.session.accountId;
-  console.log(accountId);
   if (is.existy(accountId) && onlineAccountIds.indexOf(accountId) == -1) {
     onlineAccountIds.push(accountId);
     socket.join('onlineAccounts');
@@ -190,17 +201,14 @@ io.on('connection', function(socket){
     if (i != -1) {
       onlineAccountIds = onlineAccountIds.slice(i, 0);
     }
-    console.log('disconnect', onlineAccountIds);
   });
   socket.on('chat', function(msg) {
-    console.log(msg);
     var accountId = socket.request.session.accountId;
     knex('account')
       .where('id', accountId)
       .select('username')
       .exec(function(err, data) {
         var username = data[0].username;
-        console.log(username);
         io.to('onlineAccounts').emit('chat', username + ': ' + msg);
       });
   });
@@ -216,7 +224,6 @@ io.on('connection', function(socket){
     }
     socket.disconect();
   });
-  console.log('onlineAccountIds', onlineAccountIds);
 });
 
 var server = http.listen(app.get('port'), function(){

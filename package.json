@@ -6,8 +6,10 @@
     "buildClient": "cd client; npm run build; cd .."
   },
   "dependencies": {
+    "bluebird": "^2.9.25",
     "body-parser": "^1.12.3",
     "bookshelf": "^0.7.9",
+    "checkit": "^0.5.1",
     "compression": "^1.4.3",
     "connect-redis": "^2.3.0",
     "express": "^4.12.3",
