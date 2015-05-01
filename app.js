@@ -173,6 +173,7 @@ apiRouter.post('/account/login', function(req, res) {
   var password = req.body.password;
   Account.login(username, password)
     .then(function(account) {
+      req.session.accountId = account.get('id');
       res.json(account.omit('password'));
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: username + ' not found'});
