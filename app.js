@@ -73,6 +73,9 @@ var CardParty = bookshelf.Model.extend({
   tableName: 'card_party',
   card: function() {
     return this.belongsTo(Card, 'card_id');
+  },
+  cardPartyInfo: function() {
+    return this.belongsTo(CardPartyInfo, 'card_party_info_id');
   }
 });
 
@@ -82,7 +85,7 @@ var CardPartyInfo = bookshelf.Model.extend({
     return this.belongsTo(Account, 'account_id');
   },
   cardParty: function() {
-    return this.hasMany(CardParty, 'id');
+    return this.hasMany(CardParty, 'card_party_info_id');
   }
 });
 
@@ -110,6 +113,11 @@ var Account = bookshelf.Model.extend({
   tableName: 'account',
   initialize: function() {
     this.on('creating', this.validateCreating);
+    this.on('created', this.createCardParty);
+  },
+  createCardParty: function(account, resp, options) {
+    var accountId = account.get('id');
+    return new CardPartyInfo({'account_id': accountId}).save();
   },
   validateCreating: function() {
     return checkit(AccountCreatingRules).run(this.attributes);
@@ -143,12 +151,13 @@ apiRouter.get('/account/:id', function(req, res) {
     .where({id: id})
     .fetch({withRelated: AccountAllRelation})
     .then(function(account) {
-      res.json(account.omit('password'));
+      account = account.toJSON();
+      delete(account.password);
+      res.json(account);
     }).catch(function (err) {
       res.status(400).json({error: 'account get fail.'});
     });
 });
-
 
 apiRouter.post('/account/drawCard', function(req, res) {
   var accountId = req.session.accountId;
@@ -194,8 +203,13 @@ apiRouter.post('/account/drawCard', function(req, res) {
 apiRouter.post('/account/register', function(req, res) {
   new Account(req.body).save()
     .then(function(account) {
+      return Account
+        .where({id: account.get('id')})
+        .fetch({withRelated: AccountAllRelation});
+    }).then(function(account) {
       account = account.toJSON();
       delete(account.password);
+      req.session.accountId = account.id;
       res.json(account);
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
@@ -217,7 +231,63 @@ apiRouter.post('/account/loginBySession', function(req, res) {
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: 'account not found.'});
     }).catch(function(err) {
-      console.error(err);
+      res.status(400).json({error: 'unknown found.'});
+    });
+});
+
+apiRouter.post('/account/cardParty/leave', function(req, res) {
+  var cardPartyId = req.body.cardPartyId;
+  var accountId = req.session.accountId;
+  if (!cardPartyId) {
+    res.status(400).json({error: 'wrong form.'});
+    return;
+  } else if (!accountId) {
+    res.status(400).json({error: 'need login.'});
+    return;
+  }
+  CardParty.forge({id: cardPartyId})
+    .destroy()
+    .then(function() {
+      res.json(true);
+    }).catch(function(err) {
+      res.status(400).json({error: 'something wrong.'});
+    });
+});
+
+apiRouter.post('/account/cardParty/join', function(req, res) {
+  var cardId = req.body.cardId;
+  var slotIndex = req.body.slotIndex;
+  var cardPartyInfoId = req.body.cardPartyInfoId;
+  var accountId = req.session.accountId;
+  if (!cardId || !slotIndex || !cardPartyInfoId) {
+    res.status(400).json({error: 'wrong form.'});
+    return;
+  } else if (!accountId) {
+    res.status(400).json({error: 'need login.'});
+    return;
+  }
+  // TODO
+  // do more check and optimize!
+  Card
+    .query()
+    .where({id: cardId, account_id: accountId})
+    .count()
+    .then(function(column) {
+      var count = column[0].count;
+      if (count <= 0) {
+        throw new Error('not found card');
+      }
+      return count;
+    }).then(function(count) {
+      return (
+        CardParty.forge({card_party_info_id: cardPartyInfoId,
+                         slot_index: slotIndex,
+                         card_id: cardId}).save()
+      );
+    }).then(function(cardParty) {
+      res.json(cardParty.get('id'));
+    }).catch(function(err) {
+      res.status(400).json({error: 'something wrong.'});
     });
 });
 
