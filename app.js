@@ -47,8 +47,20 @@ var BaseCard = bookshelf.Model.extend({
   }
 });
 
+
+var CardCreatingRules = {
+  account_id: ['required', 'integer', 'min:1'],
+  base_card_id: ['required', 'integer', 'min:1']
+};
+
 var Card = bookshelf.Model.extend({
   tableName: 'card',
+  initialize: function() {
+    this.on('creating', this.validateCreating);
+  },
+  validateCreating: function() {
+    return checkit(CardCreatingRules).run(this.attributes);
+  },
   account: function() {
     return this.belongsTo(Account, 'account_id');
   },
@@ -74,7 +86,7 @@ var CardPartyInfo = bookshelf.Model.extend({
   }
 });
 
-var AccountSaveRules = {
+var AccountCreatingRules = {
   username: ['required', 'minLength:4', 'maxLength:24', function(val) {
     return knex('account').where('username', '=', val).then(function(resp) {
       if (resp.length > 0) throw new Error('The username is already in use.');
@@ -97,10 +109,10 @@ var AccountAllRelation = ['deck',
 var Account = bookshelf.Model.extend({
   tableName: 'account',
   initialize: function() {
-    this.on('saving', this.validateSave);
+    this.on('creating', this.validateCreating);
   },
-  validateSave: function() {
-    return checkit(AccountSaveRules).run(this.attributes);
+  validateCreating: function() {
+    return checkit(AccountCreatingRules).run(this.attributes);
   },
   deck: function() {
     return this.hasMany(Card);
@@ -111,21 +123,20 @@ var Account = bookshelf.Model.extend({
 }, {
   login: Promise.method(function(username, password) {
     var query = {username: username, password: password};
-    return new this(query)
-      .fetch({require: true,
-              withRelated: AccountAllRelation});
+    return this.where(query)
+      .fetch({require: true, withRelated: AccountAllRelation});
   }),
   loginBySession: Promise.method(function(accountId) {
-    return new this({id: accountId})
-      .fetch({require: true,
-              withRelated: AccountAllRelation});
+    var query = {id: accountId};
+    return this.where(query)
+      .fetch({require: true, withRelated: AccountAllRelation});
   })
 });
 
 apiRouter.get('/account/:id', function(req, res) {
   var id = parseInt(req.params.id);
   if (is.nan(id)) {
-    res.json(null);
+    res.status(400).json({error: 'account get fail.'});
     return;
   }
   Account
@@ -138,10 +149,54 @@ apiRouter.get('/account/:id', function(req, res) {
     });
 });
 
+
+apiRouter.post('/account/drawCard', function(req, res) {
+  var accountId = req.session.accountId;
+  if (!is.existy(accountId)) {
+    res.status(400).json({error: 'session id not found.'});
+    return;
+  }
+  var cardPrice = 1;
+  Account
+    .query()
+    .where({id: accountId})
+    .select('money')
+    .then(function(account) {
+      var money = account[0].money;
+      var finalMoney = money - cardPrice;
+      if (finalMoney < 0) {
+        throw new Error('money no enougth for draw card.');
+      }
+      return finalMoney;
+    }).then(function(finalMoney) {
+      return (
+        new Account({id: accountId})
+          .save({money: finalMoney}, {patch: true})
+      );
+    }).then(function(_account) {
+      return BaseCard.query().count();
+    }).then(function(column) {
+      var baseCardId = _.random(1, parseInt(column[0].count));
+      return (new Card({account_id: accountId,
+                        base_card_id: baseCardId}).save());
+    }).then(function(card) {
+      return (
+        Card.where({id: card.get('id')})
+          .fetch({withRelated: 'baseCard'})
+      );
+    }).then(function(card) {
+      res.json(card.toJSON());
+    }).catch(function(err) {
+      res.status(400).json({error: 'account draw card fail.'});
+    });
+});
+
 apiRouter.post('/account/register', function(req, res) {
   new Account(req.body).save()
     .then(function(account) {
-      res.json(account.omit('password'));
+      account = account.toJSON();
+      delete(account.password);
+      res.json(account);
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
     });
@@ -155,7 +210,10 @@ apiRouter.post('/account/loginBySession', function(req, res) {
   }
   Account.loginBySession(accountId)
     .then(function(account) {
-      res.json(account.omit('password'));
+      account = account.toJSON();
+      delete(account.password);
+      req.session.accountId = account.id;
+      res.json(account);
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: 'account not found.'});
     }).catch(function(err) {
@@ -163,23 +221,25 @@ apiRouter.post('/account/loginBySession', function(req, res) {
     });
 });
 
-apiRouter.post('/account/logout', function(req, res) {
-  req.session.destroy();
-  res.json(true);
-});
-
 apiRouter.post('/account/login', function(req, res) {
   var username = req.body.username;
   var password = req.body.password;
   Account.login(username, password)
     .then(function(account) {
-      req.session.accountId = account.get('id');
-      res.json(account.omit('password'));
+      account = account.toJSON();
+      delete(account.password);
+      req.session.accountId = account.id;
+      res.json(account);
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: username + ' not found'});
     }).catch(function(err) {
       res.status(400).json({error: username + ' not found'});
     });
+});
+
+apiRouter.post('/account/logout', function(req, res) {
+  req.session.destroy();
+  res.json(true);
 });
 
 app.use('/api', apiRouter);
