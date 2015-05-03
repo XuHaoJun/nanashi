@@ -2,21 +2,22 @@ var session = require('express-session');
 var RedisStore = require('connect-redis')(session);
 
 var redisConfig = require('./redis');
-
-var redisStore;
-if (redisConfig) {
-  redisStore = new RedisStore(redisConfig);
-}
+redisConfig = JSON.parse(JSON.stringify(redisConfig));
+redisConfig.db = 1;
+var redisStore = new RedisStore(redisConfig);
 
 var sessionConfig = {
   develop: {
     secret: 'yourSecretKey',
+    store: redisStore,
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false
   },
   production: {
     secret: 'YourSecretKey',
-    store: redisStore
+    store: redisStore,
+    resave: false,
+    saveUninitialized: false
   }
 };
 
