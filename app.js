@@ -113,11 +113,6 @@ var Account = bookshelf.Model.extend({
   tableName: 'account',
   initialize: function() {
     this.on('creating', this.validateCreating);
-    this.on('created', this.createCardParty);
-  },
-  createCardParty: function(account, resp, options) {
-    var accountId = account.get('id');
-    return new CardPartyInfo({'account_id': accountId}).save();
   },
   validateCreating: function() {
     return checkit(AccountCreatingRules).run(this.attributes);
@@ -201,11 +196,17 @@ apiRouter.post('/account/drawCard', function(req, res) {
 });
 
 apiRouter.post('/account/register', function(req, res) {
-  new Account(req.body).save()
+  Account
+    .forge(req.body)
+    .save()
     .then(function(account) {
-      return Account
-        .where({id: account.get('id')})
-        .fetch({withRelated: AccountAllRelation});
+      return CardPartyInfo.forge({'account_id': account.get('id')}).save();
+    }).then(function(cardPartyInfo) {
+      return (
+        Account
+          .where({id: cardPartyInfo.get('account_id')})
+          .fetch({withRelated: AccountAllRelation})
+      );
     }).then(function(account) {
       account = account.toJSON();
       delete(account.password);
@@ -275,18 +276,36 @@ apiRouter.post('/account/cardParty/join', function(req, res) {
     .then(function(column) {
       var count = column[0].count;
       if (count <= 0) {
-        throw new Error('not found card');
+        throw new Error('not found card.');
       }
       return count;
-    }).then(function(count) {
+    }).then(function() {
       return (
-        CardParty.forge({card_party_info_id: cardPartyInfoId,
-                         slot_index: slotIndex,
-                         card_id: cardId}).save()
+        CardParty
+          .where({card_id: cardId,
+                  card_party_info_id: cardPartyInfoId})
+          .fetch()
       );
+    }).then(function(cardParty) {
+      if (cardParty === null) {
+        return (
+          CardParty.forge(
+            {card_party_info_id: cardPartyInfoId,
+             slot_index: slotIndex,
+             card_id: cardId})
+            .save()
+        );
+      } else {
+        return (
+          CardParty
+            .forge({id: cardParty.get('id')})
+            .save({slot_index: slotIndex})
+        );
+      }
     }).then(function(cardParty) {
       res.json(cardParty.get('id'));
     }).catch(function(err) {
+      console.log(err);
       res.status(400).json({error: 'something wrong.'});
     });
 });
@@ -335,12 +354,16 @@ io.on('connection', function(socket){
   });
   socket.on('chat', function(msg) {
     var accountId = socket.request.session.accountId;
-    knex('account')
-      .where('id', accountId)
+    Account
+      .query()
+      .where({id: accountId})
       .select('username')
-      .exec(function(err, data) {
+      .then(function(data) {
         var username = data[0].username;
         io.to('onlineAccounts').emit('chat', username + ': ' + msg);
+      })
+      .catch(function(err) {
+        console.log(err);
       });
   });
   socket.on('logout', function() {
