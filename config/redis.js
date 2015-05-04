@@ -12,7 +12,6 @@ var redisConfig = {
   develop: {
     port: 6379,
     hostanme: 'localhost',
-    db: 1,
     options: {
       no_ready_check: true
     }
@@ -20,7 +19,6 @@ var redisConfig = {
   production: {
     port: (redisURL ? redisURL.port : 6379),
     hostanme: (redisURL ? redisURL.hostname : 'localhost'),
-    db: 1,
     options: {
       auth_pass: auth_pass,
       no_ready_check: true

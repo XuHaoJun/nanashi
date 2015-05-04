@@ -8,12 +8,20 @@ var compress = require('compression');
 var express = require('express');
 var expressSession = require('express-session');
 var bodyParser = require('body-parser');
+var redis = require("redis");
+
 
 var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
 
 var configs = require('./config');
+
+var redisClient = redis.createClient(configs.redis.port,
+                                     configs.redis.hostanme,
+                                     configs.redis.options);
+
+redisClient.del('onlineAccountIds');
 
 var knex = require('knex')(configs.db);
 var bookshelf = require('bookshelf')(knex);
@@ -30,9 +38,12 @@ app.use(compress());
 app.use(logger('dev'));
 
 var session = expressSession(configs.session);
+
 io.use(function(socket, next) {
   session(socket.request, socket.request.res, next);
 });
+
+app.set('trust proxy', 1);
 
 app.use(session);
 
@@ -46,7 +57,6 @@ var BaseCard = bookshelf.Model.extend({
     return this.hasMany(Card, 'base_card_id');
   }
 });
-
 
 var CardCreatingRules = {
   account_id: ['required', 'integer', 'min:1'],
@@ -211,6 +221,7 @@ apiRouter.post('/account/register', function(req, res) {
       account = account.toJSON();
       delete(account.password);
       req.session.accountId = account.id;
+      req.session.save();
       res.json(account);
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
@@ -227,12 +238,50 @@ apiRouter.post('/account/loginBySession', function(req, res) {
     .then(function(account) {
       account = account.toJSON();
       delete(account.password);
-      req.session.accountId = account.id;
       res.json(account);
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: 'account not found.'});
     }).catch(function(err) {
       res.status(400).json({error: 'unknown found.'});
+    });
+});
+
+apiRouter.post('/account/card/levelUp', function(req, res) {
+  var cardId = req.body.id;
+  var accountId = req.session.accountId;
+  if (!cardId) {
+    res.status(400).json({error: 'wrong form.'});
+    return;
+  } else if (!accountId) {
+    res.status(400).json({error: 'need login.'});
+    return;
+  }
+  var cardLevel = null;
+  Card
+    .where({id: cardId})
+    .fetch()
+    .then(function(card) {
+      var level = card.get('level');
+      cardLevel = level;
+      if (level >= 50) {
+        throw new Error('card level must <= 50.');
+      }
+      return (
+        Account.where({id: accountId}).fetch()
+      );
+    }).then(function(account) {
+      var cry = account.get('cry');
+      var newCry = cry - (cardLevel * 10 + 25);
+      if (newCry < 0) {
+        throw new Error('cry is not enough.');
+      }
+      return Account.forge({id: accountId}).save({cry: newCry});
+    }).then(function(account) {
+      res.json(true);
+      return Card.forge({id: cardId}).save({level: cardLevel + 1});
+    }).catch(function(err) {
+      console.log(err);
+      res.status(400).json({error: 'something wrong.'});
     });
 });
 
@@ -305,7 +354,6 @@ apiRouter.post('/account/cardParty/join', function(req, res) {
     }).then(function(cardParty) {
       res.json(cardParty.get('id'));
     }).catch(function(err) {
-      console.log(err);
       res.status(400).json({error: 'something wrong.'});
     });
 });
@@ -318,6 +366,7 @@ apiRouter.post('/account/login', function(req, res) {
       account = account.toJSON();
       delete(account.password);
       req.session.accountId = account.id;
+      req.session.save();
       res.json(account);
     }).catch(Account.NotFoundError, function() {
       res.status(400).json({error: username + ' not found'});
@@ -327,6 +376,7 @@ apiRouter.post('/account/login', function(req, res) {
 });
 
 apiRouter.post('/account/logout', function(req, res) {
+  delete(req.session.accountId);
   req.session.destroy();
   res.json(true);
 });
@@ -336,6 +386,15 @@ app.use('/api', apiRouter);
 io.on('connection', function(socket){
   var accountId = socket.request.session.accountId;
   if (is.existy(accountId) && onlineAccountIds.indexOf(accountId) == -1) {
+    socket.request.session.save();
+    redisClient.sadd('onlineAccountIds', accountId);
+    redisClient.lrange('chatMessages', 0, -1, function(error, messages) {
+      if (error) {
+        console.log(error);
+      } else if(messages.length > 0 ) {
+        socket.emit('chat', messages.reverse());
+      }
+    });
     onlineAccountIds.push(accountId);
     socket.join('onlineAccounts');
   } else {
@@ -349,6 +408,7 @@ io.on('connection', function(socket){
     }
     var i = onlineAccountIds.indexOf(accountId);
     if (i != -1) {
+      redisClient.srem('onlineAccountIds', accountId);
       onlineAccountIds = onlineAccountIds.slice(i, 0);
     }
   });
@@ -360,11 +420,30 @@ io.on('connection', function(socket){
       .select('username')
       .then(function(data) {
         var username = data[0].username;
-        io.to('onlineAccounts').emit('chat', username + ': ' + msg);
+        var finalMsg = username + ': ' + msg;
+        redisClient.lpush('chatMessages', finalMsg);
+        redisClient.ltrim('chatMessages', 0, 99);
+        io.to('onlineAccounts').emit('chat', finalMsg);
       })
       .catch(function(err) {
         console.log(err);
       });
+  });
+  socket.on('battle', function(battle) {
+    switch(battle.type) {
+    case 'requestNPC':
+      // battle.npcId
+      break;
+    case 'requestPC':
+      // battle.accountId
+      break;
+    case 'useSkill':
+      // battle.skillId
+      break;
+    default:
+      // never run this.
+      break;
+    }
   });
   socket.on('logout', function() {
     // right way disconect.
@@ -374,6 +453,7 @@ io.on('connection', function(socket){
     }
     var i = onlineAccountIds.indexOf(accountId);
     if (i != -1) {
+      redisClient.srem('onlineAccountIds', accountId);
       onlineAccountIds = onlineAccountIds.slice(i, 0);
     }
     socket.disconect();
@@ -386,11 +466,16 @@ var server = http.listen(app.get('port'), function(){
 killable(server);
 
 // Handle Ctrl-c
+// TODO
+// Promise it!.
 process.on('SIGINT', function() {
   server.kill(function() {
-    // TODO
-    // find right way to kill pg pool connections!
-    process.exit(0);
+    knex.destroy(function() {
+      redisClient.del('onlineAccountIds', 'chatMessages', function() {
+        redisClient.quit();
+        process.exit(0);
+      });
+    });
   });
 });
 

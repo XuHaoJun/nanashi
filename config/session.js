@@ -3,7 +3,6 @@ var RedisStore = require('connect-redis')(session);
 
 var redisConfig = require('./redis');
 redisConfig = JSON.parse(JSON.stringify(redisConfig));
-redisConfig.db = 1;
 var redisStore = new RedisStore(redisConfig);
 
 var sessionConfig = {
