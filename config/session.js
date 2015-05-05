@@ -1,8 +1,16 @@
+var _ = require('lodash');
 var session = require('express-session');
 var RedisStore = require('connect-redis')(session);
 
-var redisConfig = require('./redis');
-redisConfig = JSON.parse(JSON.stringify(redisConfig));
+var redisConfig = require('./redis').getJSON();
+if (redisConfig.hostname) {
+  redisConfig.host = redisConfig.hostname;
+}
+if (redisConfig.options) {
+  _.forEach(redisConfig.options, function(v, k) {
+    redisConfig[k] = v;
+  });
+}
 var redisStore = new RedisStore(redisConfig);
 
 var sessionConfig = {

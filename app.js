@@ -10,16 +10,15 @@ var expressSession = require('express-session');
 var bodyParser = require('body-parser');
 var redis = require("redis");
 
-
 var app = express();
 var http = require('http').Server(app);
 var io = require('socket.io')(http);
 
 var configs = require('./config');
 
-var redisClient = redis.createClient(configs.redis.port,
-                                     configs.redis.hostanme,
-                                     configs.redis.options);
+var redisClient = redis.createClient(configs.redis.getPort(),
+                                     configs.redis.getHostname(),
+                                     configs.redis.getOptions().toJSON());
 
 redisClient.del('onlineAccountIds');
 

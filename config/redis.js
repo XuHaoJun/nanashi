@@ -1,3 +1,4 @@
+var Immutable = require('immutable');
 var url = require('url');
 
 var redisURL;
@@ -18,7 +19,7 @@ var redisConfig = {
   },
   production: {
     port: (redisURL ? redisURL.port : 6379),
-    hostanme: (redisURL ? redisURL.hostname : 'localhost'),
+    hostname: (redisURL ? redisURL.hostname : 'localhost'),
     options: {
       auth_pass: auth_pass,
       no_ready_check: true
@@ -31,4 +32,22 @@ if (redisConfig.production !== undefined && process.env.NODE_ENV == 'production'
   _config = redisConfig.production;
 }
 
-module.exports = _config;
+_config = Immutable.fromJS(_config);
+
+module.exports = {
+  get: function() {
+    return _config;
+  },
+  getHostname: function() {
+    return _config.get('hostname');
+  },
+  getOptions: function() {
+    return _config.get('options');
+  },
+  getPort: function() {
+    return _config.get('port');
+  },
+  getJSON: function() {
+    return _config.toJSON();
+  }
+};
