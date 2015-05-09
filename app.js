@@ -246,7 +246,9 @@ app.use(session);
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use('/', express.static(__dirname + '/client/dist'));
+if (configs.server.staticDirectory) {
+  app.use('/', express.static(configs.server.staticDirectory));
+}
 
 if (configs.oauth2.facebook) {
   app.get('/auth/facebook', passport.authenticate('facebook', { scope: [ 'email' ] }));
