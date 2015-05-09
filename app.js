@@ -9,6 +9,9 @@ var compress = require('compression');
 var express = require('express');
 var expressSession = require('express-session');
 var bodyParser = require('body-parser');
+var passport = require('passport');
+var LocalStrategy = require('passport-local').Strategy;
+var FacebookStrategy = require('passport-facebook').Strategy;
 var redis = require("redis");
 
 var app = express();
@@ -50,29 +53,6 @@ var npcCardPartyInfos = {
 };
 
 npcCardPartyInfos = Immutable.fromJS(npcCardPartyInfos);
-
-app.set('port', process.env.PORT || 3000);
-
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-app.use(compress());
-
-app.use(logger('dev'));
-
-var session = expressSession(configs.session);
-
-io.use(function(socket, next) {
-  session(socket.request, socket.request.res, next);
-});
-
-app.set('trust proxy', 1);
-
-app.use(session);
-
-app.use('/', express.static(__dirname + '/client/dist'));
-
-var apiRouter = express.Router();
 
 var BaseCard = bookshelf.Model.extend({
   tableName: 'base_card',
@@ -157,18 +137,126 @@ var Account = bookshelf.Model.extend({
     return this.hasMany(CardPartyInfo, 'account_id');
   }
 }, {
-  login: Promise.method(function(username, password) {
+  login: Promise.method(function(username, password, options) {
+    options = options ? options : {};
     var query = {username: username, password: password};
+    if (options.noRelation) {
+      return this.where(query).fetch({require: true});
+    }
     return this.where(query)
       .fetch({require: true, withRelated: AccountAllRelation});
   }),
-  loginBySession: Promise.method(function(accountId) {
+  getAll: Promise.method(function(accountId) {
     var query = {id: accountId};
     return this.where(query)
       .fetch({require: true, withRelated: AccountAllRelation});
   })
 });
 
+passport.use(new LocalStrategy(
+  function(username, password, done) {
+    // TODO
+    // check facebok-xxxx
+    Account
+      .login(username, password, {noRelation: true})
+      .then(function(account) {
+        done(null, account);
+      }).catch(function(err) {
+        done(null, false);
+      });
+  }
+));
+
+if (configs.oauth2.facebook) {
+  passport.use(new FacebookStrategy(configs.oauth2.facebook, function(accessToken, refreshToken, profile, done) {
+    Account
+      .where({username: 'facebook-'+profile.id, password: profile.id})
+      .fetch()
+      .then(function(account) {
+        done(null, account);
+      }).catch(Account.NotFoundError, function() {
+        var form = {username: 'facebook' + profile.id,
+                    password: profile.id,
+                    email: profile.emails[0].value,
+                    account_provider_provider: 'facebook'};
+        Account
+          .forge(form)
+          .save()
+          .then(function(account) {
+            return CardPartyInfo.forge({'account_id': account.get('id')}).save();
+          }).then(function(cardPartyInfo) {
+            return (
+              Account
+                .where({id: cardPartyInfo.get('account_id')})
+                .fetch()
+            );
+          }).then(function(account) {
+            done(null, account);
+          }).catch(function(err) {
+            done(err, null);
+          });
+      }).catch(function(err) {
+        done(err, null);
+      });
+  }));
+}
+
+passport.serializeUser(function(user, done) {
+  done(null, user.get('id'));
+});
+
+passport.deserializeUser(function(id, done) {
+  Account
+    .query()
+    .where({id: id})
+    .select('id')
+    .then(function() {
+      done(null, {accountId: id});
+    }).catch(function(err) {
+      done(err, null);
+    });
+});
+
+function isAuthenticated(req, res, next) {
+  if (req.isAuthenticated()) {
+    return next();
+  }
+  return res.status(401).json({error: 'account not found.'});
+}
+
+app.set('port', process.env.PORT || 3000);
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+app.use(compress());
+
+app.use(logger('dev'));
+
+var session = expressSession(configs.session);
+
+io.use(function(socket, next) {
+  session(socket.request, socket.request.res, next);
+});
+
+app.set('trust proxy', 1);
+
+app.use(session);
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.use('/', express.static(__dirname + '/client/dist'));
+
+if (configs.oauth2.facebook) {
+  app.get('/auth/facebook', passport.authenticate('facebook', { scope: [ 'email' ] }));
+
+  app.get('/auth/facebook/callback', passport.authenticate('facebook'), function(req, res) {
+    res.redirect('/');
+  });
+}
+
+var apiRouter = express.Router();
 apiRouter.get('/account/:id', function(req, res) {
   var id = parseInt(req.params.id);
   if (is.nan(id)) {
@@ -190,7 +278,7 @@ apiRouter.get('/account/:id', function(req, res) {
 apiRouter.post('/account/drawCard', function(req, res) {
   var accountId = req.session.accountId;
   if (!is.existy(accountId)) {
-    res.status(400).json({error: 'session id not found.'});
+    res.status(401).json({error: 'session id not found.'});
     return;
   }
   var cardPrice = 1;
@@ -251,45 +339,35 @@ apiRouter.post('/account/register', function(req, res) {
       return (
         Account
           .where({id: cardPartyInfo.get('account_id')})
-          .fetch({withRelated: AccountAllRelation})
+          .fetch()
       );
     }).then(function(account) {
-      account = account.toJSON();
-      delete(account.password);
-      req.session.accountId = account.id;
-      req.session.save();
-      res.json(account);
+      res.json(account.get('id'));
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
     });
 });
 
-apiRouter.post('/account/loginBySession', function(req, res) {
-  var accountId = req.session.accountId;
-  if (!is.existy(accountId)) {
-    res.status(400).json({error: 'session id not found.'});
-    return;
-  }
-  Account.loginBySession(accountId)
+apiRouter.get('/account', isAuthenticated, function(req, res) {
+  var accountId = req.user.accountId;
+  Account.getAll(accountId)
     .then(function(account) {
       account = account.toJSON();
       delete(account.password);
       res.json(account);
     }).catch(Account.NotFoundError, function() {
-      res.status(400).json({error: 'account not found.'});
+      // sholud never not found account, beacuse is Autogenerated!
+      res.status(401).json({error: 'account not found.'});
     }).catch(function(err) {
-      res.status(400).json({error: 'unknown found.'});
+      res.status(400).json({error: 'something wrong.'});
     });
 });
 
-apiRouter.post('/account/card/levelUp', function(req, res) {
+apiRouter.post('/account/card/levelUp', isAuthenticated, function(req, res) {
   var cardId = req.body.id;
-  var accountId = req.session.accountId;
+  var accountId = req.user.accountId;
   if (!cardId) {
     res.status(400).json({error: 'wrong form.'});
-    return;
-  } else if (!accountId) {
-    res.status(400).json({error: 'need login.'});
     return;
   }
   var cardLevel = null;
@@ -321,14 +399,11 @@ apiRouter.post('/account/card/levelUp', function(req, res) {
     });
 });
 
-apiRouter.post('/account/cardParty/leave', function(req, res) {
+apiRouter.post('/account/cardParty/leave', isAuthenticated, function(req, res) {
   var cardPartyId = req.body.cardPartyId;
-  var accountId = req.session.accountId;
+  var accountId = req.user.accountId;
   if (!cardPartyId) {
     res.status(400).json({error: 'wrong form.'});
-    return;
-  } else if (!accountId) {
-    res.status(400).json({error: 'need login.'});
     return;
   }
   CardParty.forge({id: cardPartyId})
@@ -340,16 +415,13 @@ apiRouter.post('/account/cardParty/leave', function(req, res) {
     });
 });
 
-apiRouter.post('/account/cardParty/join', function(req, res) {
+apiRouter.post('/account/cardParty/join', isAuthenticated, function(req, res) {
   var cardId = req.body.cardId;
   var slotIndex = req.body.slotIndex;
   var cardPartyInfoId = req.body.cardPartyInfoId;
-  var accountId = req.session.accountId;
+  var accountId = req.user.accountId;
   if (!cardId || !slotIndex || !cardPartyInfoId) {
     res.status(400).json({error: 'wrong form.'});
-    return;
-  } else if (!accountId) {
-    res.status(400).json({error: 'need login.'});
     return;
   }
   // TODO
@@ -394,25 +466,12 @@ apiRouter.post('/account/cardParty/join', function(req, res) {
     });
 });
 
-apiRouter.post('/account/login', function(req, res) {
-  var username = req.body.username;
-  var password = req.body.password;
-  Account.login(username, password)
-    .then(function(account) {
-      account = account.toJSON();
-      delete(account.password);
-      req.session.accountId = account.id;
-      req.session.save();
-      res.json(account);
-    }).catch(Account.NotFoundError, function() {
-      res.status(400).json({error: username + ' not found'});
-    }).catch(function(err) {
-      res.status(400).json({error: username + ' not found'});
-    });
+apiRouter.post('/account/login', passport.authenticate('local'), function(req, res) {
+  res.json(req.user.get('id'));
 });
 
-apiRouter.post('/account/logout', function(req, res) {
-  delete(req.session.accountId);
+apiRouter.post('/account/logout', isAuthenticated, function(req, res) {
+  req.logout();
   req.session.destroy();
   res.json(true);
 });
@@ -420,10 +479,10 @@ apiRouter.post('/account/logout', function(req, res) {
 var _attributeTypes = ['hp', 'spd', 'atk', 'def'];
 var _effortTypes = ['hp_effort', 'spd_effort', 'atk_effort', 'def_effort'];
 
-apiRouter.post('/account/card/effortUpdate', function(req, res) {
-  var accountId = req.session.accountId;
+apiRouter.post('/account/card/effortUpdate', isAuthenticated, function(req, res) {
+  var accountId = req.user.accountId;
   if (!accountId) {
-    res.status(400).json({error: 'need login.'});
+    res.status(401).json({error: 'need login.'});
     return;
   }
   var cardId = req.body.id;
@@ -469,7 +528,7 @@ apiRouter.post('/account/card/effortUpdate', function(req, res) {
 app.use('/api', apiRouter);
 
 io.on('connection', function(socket){
-  var accountId = socket.request.session.accountId;
+  var accountId = socket.request.session.passport.user;
   if (!is.existy(accountId)) {
     socket.disconnect();
     return;
@@ -502,7 +561,6 @@ io.on('connection', function(socket){
       socket.join('onlineAccounts');
     }).catch(console.log);
   socket.on('disconnect', function() {
-    var accountId = socket.request.session.accountId;
     if (!is.existy(accountId)) {
       return;
     }
@@ -510,7 +568,6 @@ io.on('connection', function(socket){
     redisClient.hdel('onlineAccountUsernames', accountId);
   });
   socket.on('chat', function(msg) {
-    var accountId = socket.request.session.accountId;
     redisClient
       .hgetAsync('onlineAccountUsernames', accountId)
       .then(function(username) {
@@ -539,7 +596,6 @@ io.on('connection', function(socket){
       }).catch(console.log);
   });
   socket.on('battle', function(battle) {
-    var accountId = socket.request.session.accountId;
     if (!is.existy(accountId)) {
       socket.emit('battle', {error: 'something wrong.'});
       return;
