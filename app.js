@@ -138,6 +138,22 @@ var Account = bookshelf.Model.extend({
     return this.hasMany(CardPartyInfo, 'account_id');
   }
 }, {
+  register: Promise.method(function(form) {
+    return (
+      this
+        .forge(form)
+        .save()
+        .then(function(account) {
+          return CardPartyInfo.forge({'account_id': account.get('id')}).save();
+        }).then(function(cardPartyInfo) {
+          return (
+            Account
+              .where({id: cardPartyInfo.get('account_id')})
+              .fetch()
+          );
+        })
+    );
+  }),
   login: Promise.method(function(username, password, options) {
     options = options ? options : {};
     var query = {username: username, password: password};
@@ -180,18 +196,8 @@ if (configs.oauth2.facebook) {
                     password: profile.id,
                     email: profile.emails[0].value,
                     account_provider_provider: 'facebook'};
-        Account
-          .forge(form)
-          .save()
+        Account.register(form)
           .then(function(account) {
-            return CardPartyInfo.forge({'account_id': account.get('id')}).save();
-          }).then(function(cardPartyInfo) {
-            return (
-              Account
-                .where({id: cardPartyInfo.get('account_id')})
-                .fetch()
-            );
-          }).then(function(account) {
             done(null, account);
           }).catch(function(err) {
             done(err, null);
@@ -340,18 +346,12 @@ apiRouter.post('/account/drawCard', function(req, res) {
 
 apiRouter.post('/account/register', function(req, res) {
   Account
-    .forge(req.body)
-    .save()
+    .register(req.body)
     .then(function(account) {
-      return CardPartyInfo.forge({'account_id': account.get('id')}).save();
-    }).then(function(cardPartyInfo) {
-      return (
-        Account
-          .where({id: cardPartyInfo.get('account_id')})
-          .fetch()
-      );
-    }).then(function(account) {
-      res.json(account.get('id'));
+      var id = account.get('id');
+      req.session.passport = {user: id};
+      req.session.save();
+      res.json(id);
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
     });
