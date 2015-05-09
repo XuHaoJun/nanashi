@@ -2,27 +2,17 @@ var _ = require('lodash');
 var session = require('express-session');
 var RedisStore = require('connect-redis')(session);
 
-var redisConfig = require('./redis').getJSON();
-if (redisConfig.hostname) {
-  redisConfig.host = redisConfig.hostname;
-}
-if (redisConfig.options) {
-  _.forEach(redisConfig.options, function(v, k) {
-    redisConfig[k] = v;
-  });
-}
-var redisStore = new RedisStore(redisConfig);
 
 var sessionConfig = {
   develop: {
     secret: 'yourSecretKey',
-    store: redisStore,
+    store: {client: 'redis'},
     resave: false,
     saveUninitialized: false
   },
   production: {
     secret: 'YourSecretKey',
-    store: redisStore,
+    store: {client: 'redis'},
     resave: false,
     saveUninitialized: false
   }

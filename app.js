@@ -8,6 +8,7 @@ var logger = require('morgan');
 var compress = require('compression');
 var express = require('express');
 var expressSession = require('express-session');
+var RedisStore = require('connect-redis')(expressSession);
 var bodyParser = require('body-parser');
 var passport = require('passport');
 var LocalStrategy = require('passport-local').Strategy;
@@ -233,7 +234,13 @@ app.use(compress());
 
 app.use(logger('dev'));
 
-var session = expressSession(configs.session);
+var session;
+if (configs.session.store.client == 'redis') {
+  configs.session.store = new RedisStore({client: redisClient});
+  session = expressSession(configs.session);
+} else {
+  session = expressSession(configs.session);
+}
 
 io.use(function(socket, next) {
   session(socket.request, socket.request.res, next);
