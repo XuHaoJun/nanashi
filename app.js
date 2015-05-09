@@ -290,12 +290,8 @@ apiRouter.get('/account/:id', function(req, res) {
     });
 });
 
-apiRouter.post('/account/drawCard', function(req, res) {
-  var accountId = req.session.accountId;
-  if (!is.existy(accountId)) {
-    res.status(401).json({error: 'session id not found.'});
-    return;
-  }
+apiRouter.post('/account/drawCard', isAuthenticated, function(req, res) {
+  var accountId = req.user.accountId;
   var cardPrice = 1;
   Account
     .query()
