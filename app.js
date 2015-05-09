@@ -30,8 +30,7 @@ redisClient.delAsync('onlineAccountUsernames').catch(console.log);
 var knex = require('knex')(configs.db);
 var bookshelf = require('bookshelf')(knex);
 
-var onlineAccountIds = [];
-var onlineBattlingAccountIds = [];
+// var onlineBattlingAccountIds = [];
 
 var battleNPCs = {};
 
@@ -471,38 +470,56 @@ app.use('/api', apiRouter);
 
 io.on('connection', function(socket){
   var accountId = socket.request.session.accountId;
-  if (is.existy(accountId) && onlineAccountIds.indexOf(accountId) == -1) {
-    socket.request.session.save();
-    redisClient.sadd('onlineAccountIds', accountId);
-    redisClient
-      .lrangeAsync('chatMessages', 0, -1)
-      .then(function(messages) {
-        if(messages.length > 0 ) {
-          socket.emit('chat', messages.reverse());
-        }
-      }).catch(console.log);
-    onlineAccountIds.push(accountId);
-    socket.join('onlineAccounts');
-  } else {
+  if (!is.existy(accountId)) {
     socket.disconnect();
     return;
   }
+  redisClient
+    .sismemberAsync('onlineAccountIds', accountId)
+    .then(function(result) {
+      var found = (result == 1);
+      if (found) {
+        socket.disconnect();
+        return;
+      }
+      socket.request.session.save();
+      redisClient.sadd('onlineAccountIds', accountId);
+      Account
+        .query()
+        .where({id: accountId})
+        .select('username')
+        .then(function(data) {
+          var username = data[0].username;
+          return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
+        }).catch(console.log);
+      redisClient
+        .lrangeAsync('chatMessages', 0, -1)
+        .then(function(messages) {
+          if(messages.length > 0 ) {
+            socket.emit('chat', messages.reverse());
+          }
+        }).catch(console.log);
+      socket.join('onlineAccounts');
+    }).catch(console.log);
   socket.on('disconnect', function() {
     var accountId = socket.request.session.accountId;
     if (!is.existy(accountId)) {
       return;
     }
-    var i = onlineAccountIds.indexOf(accountId);
-    if (i != -1) {
-      redisClient.srem('onlineAccountIds', accountId);
-      onlineAccountIds = onlineAccountIds.slice(i, 0);
-    }
+    redisClient.srem('onlineAccountIds', accountId);
+    redisClient.hdel('onlineAccountUsernames', accountId);
   });
   socket.on('chat', function(msg) {
     var accountId = socket.request.session.accountId;
     redisClient
       .hgetAsync('onlineAccountUsernames', accountId)
       .then(function(username) {
+        var sendMessage = function(username) {
+          var finalMsg = username + ': ' + msg;
+          redisClient.lpush('chatMessages', finalMsg);
+          redisClient.ltrim('chatMessages', 0, 99);
+          io.to('onlineAccounts').emit('chat', finalMsg);
+        };
         if (username == null) {
           Account
             .query()
@@ -510,93 +527,80 @@ io.on('connection', function(socket){
             .select('username')
             .then(function(data) {
               var username = data[0].username;
-              redisClient
-                .hsetAsync('onlineAccountUsernames', accountId, username)
-                .catch(console.log);
-              var finalMsg = username + ': ' + msg;
-              redisClient.lpush('chatMessages', finalMsg);
-              redisClient.ltrim('chatMessages', 0, 99);
-              io.to('onlineAccounts').emit('chat', finalMsg);
+              redisClient.hset('onlineAccountUsernames', accountId, username);
+              sendMessage(username);
             })
             .catch(function(err) {
               console.log(err);
             });
-          return;
+        } else {
+          sendMessage(username);
         }
-        var finalMsg = username + ': ' + msg;
-        redisClient.rpush('chatMessages', finalMsg);
-        redisClient.ltrim('chatMessages', 0, 99);
-        io.to('onlineAccounts').emit('chat', finalMsg);
       }).catch(console.log);
   });
   socket.on('battle', function(battle) {
     var accountId = socket.request.session.accountId;
-    if (!is.existy(accountId) || onlineAccountIds.indexOf(accountId) == -1) {
+    if (!is.existy(accountId)) {
       socket.emit('battle', {error: 'something wrong.'});
       return;
     }
-    switch(battle.type) {
-    case 'requestNPC':
-      console.log('requestNPC', battle);
-      if (onlineBattlingAccountIds.indexOf(accountId)) {
-        socket.emit('battle', {error: 'you have one battle working.'});
-        return;
-      }
-      var finalBattle = {
-        id: battleNPCs.length,
-        state: 'battling',
-        winer: null,
-        npcId: 1,
-        npcarCardPartyInfo: npcCardPartyInfos[1],
-        accountId: accountId
-      };
-      battleNPCs[battleNPCs.length](battle);
-      onlineBattlingAccountIds.push(accountId);
-      var payload = {battleId: battle.id,
-                     npcCardPartyInfo: npcCardPartyInfos[1]
-                    };
-      socket.emit('battle', payload);
-    case 'requestPC':
-      console.log('requestPC', battle);
-      // battle.accountId
-      break;
-    case 'useSkill':
-      // console.log('requestNPC', battle);
-      // battle.targetType 'PC', 'NPC'
-      // battle.id
-      // battle.skillId
-      // battle.targetId account's card id or npc card id
-      if (battle.targetType == 'NPC') {
-        var _battle = battleNPCs[battle.id];
-        if (!battle) {
-          socket.emit('battle', {error: 'battle not found.'});
-          return;
+    redisClient
+      .sismemberAsync('onlineAccountIds', accountId)
+      .then(function(result) {
+        var found = (result == 1);
+        if (found) {
+          return found;
         }
-      } else if (battle.targetType == 'PC') {
-      }
-      break;
-    default:
-      // never run this.
-      // may disconnect it!
-      break;
-    }
-  });
-  socket.on('logout', function() {
-    // right way disconect.
-    var accountId = socket.request.session.accountId;
-    if (!is.existy(accountId)) {
-      return;
-    }
-    var i = onlineAccountIds.indexOf(accountId);
-    if (i != -1) {
-      redisClient.srem('onlineAccountIds', accountId);
-      onlineAccountIds = onlineAccountIds.slice(i, 0);
-    }
-    i = onlineBattlingAccountIds(accountId);
-    if (i != -1) {
-      onlineBattlingAccountIds = onlineBattlingAccountIds.slice(i, 0);
-    }
-    socket.disconect();
+        throw new Error('Not found account');
+      }).then(function(found) {
+        switch(battle.type) {
+        case 'requestNPC':
+          console.log('requestNPC', battle);
+          // if (onlineBattlingAccountIds.indexOf(accountId)) {
+          //   socket.emit('battle', {error: 'you have one battle working.'});
+          //   return;
+          // }
+          var finalBattle = {
+            id: battleNPCs.length,
+            state: 'battling',
+            winer: null,
+            npcId: 1,
+            npcarCardPartyInfo: npcCardPartyInfos[1],
+            accountId: accountId
+          };
+          battleNPCs[battleNPCs.length](battle);
+          // onlineBattlingAccountIds.push(accountId);
+          var payload = {battleId: battle.id,
+                         npcCardPartyInfo: npcCardPartyInfos[1]
+                        };
+          socket.emit('battle', payload);
+        case 'requestPC':
+          console.log('requestPC', battle);
+          // battle.accountId
+          break;
+        case 'useSkill':
+          // console.log('requestNPC', battle);
+          // battle.targetType 'PC', 'NPC'
+          // battle.id
+          // battle.skillId
+          // battle.targetId account's card id or npc card id
+          if (battle.targetType == 'NPC') {
+            var _battle = battleNPCs[battle.id];
+            if (!battle) {
+              socket.emit('battle', {error: 'battle not found.'});
+              return;
+            }
+          } else if (battle.targetType == 'PC') {
+          }
+          break;
+        default:
+          // never run this.
+          // may disconnect it!
+          break;
+        }
+      }).catch(function(err) {
+        socket.emit('battle', {error: 'something wrong.'});
+      });
   });
 });
 
@@ -607,28 +611,33 @@ killable(server);
 
 // Handle Ctrl-c
 // TODO
-// Promise it!.
-process.on('SIGINT', function() {
-  server.kill(function() {
-    knex.destroy(function() {
-      Promise.all([
-        redisClient.delAsync('onlineAccountUsernames'),
-        redisClient.delAsync('onlineAccountIds')
-      ]).then(function() {
-        redisClient.quit();
-        process.exit(0);
-      }).catch(function(error) {
-        console.log(error);
-        process.exit(0);
+new Promise(function(resolve) {
+  process.on('SIGINT', function() {
+    resolve();
+  });
+}).then(function() {
+  return (
+    new Promise(function(resolve) {
+      server.kill(function() {
+        resolve();
       });
+    })
+  );
+}).then(function() {
+  return new Promise(function(resolve) {
+    knex.destroy(function() {
+      resolve();
     });
   });
+}).then(function() {
+  Promise.all([
+    redisClient.delAsync('onlineAccountUsernames'),
+    redisClient.delAsync('onlineAccountIds')
+  ]).then(function() {
+    redisClient.quit();
+    process.exit(0);
+  }).catch(function(error) {
+    console.log(error);
+    process.exit(0);
+  });
 });
-
-module.exports = {
-  server: server,
-  io: io,
-  knex: knex,
-  bookshelf: bookshelf,
-  onlineAccountIds: onlineAccountIds
-};
