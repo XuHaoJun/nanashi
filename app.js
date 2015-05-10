@@ -1,4 +1,4 @@
-function createServer(options) {
+function createApp(options) {
   options = options ? options : {};
   var configs = require('./config');
   var Immutable = require('immutable');
@@ -15,7 +15,12 @@ function createServer(options) {
   var passport = require('passport');
   var LocalStrategy = require('passport-local').Strategy;
   var FacebookStrategy = require('passport-facebook').Strategy;
-  var redis = require("ioredis");
+  var redis;
+  if (configs.redis.getClient() == 'ioredis') {
+    redis = require("ioredis");
+  } else {
+    redis = require("redis");
+  }
   var node_redis = require("redis");
 
   var app = express();
@@ -24,9 +29,7 @@ function createServer(options) {
   var io = require('socket.io')(http);
 
   var pubClientOptions = configs.redis.getOptions().toJSON();
-  delete(pubClientOptions, 'no_ready_check');
   var subClientOptions = configs.redis.getOptions().toJSON();
-  delete(subClientOptions, 'no_ready_check');
   subClientOptions.detect_buffers = true;
   io.adapter(sioRedis({
     pubClient: node_redis.createClient(configs.redis.getPort(),
@@ -203,15 +206,15 @@ function createServer(options) {
   if (configs.oauth2.facebook) {
     passport.use(new FacebookStrategy(configs.oauth2.facebook, function(accessToken, refreshToken, profile, done) {
       Account
-        .where({username: 'facebook-'+profile.id, password: profile.id})
-        .fetch()
+        .where({username: 'facebook-'+profile.id})
+        .fetch({require: true})
         .then(function(account) {
           done(null, account);
         }).catch(Account.NotFoundError, function() {
-          var form = {username: 'facebook' + profile.id,
+          var form = {username: 'facebook-' + profile.id,
                       password: profile.id,
                       email: profile.emails[0].value,
-                      account_provider_provider: 'facebook'};
+                      account_provider_name: 'facebook'};
           Account.register(form)
             .then(function(account) {
               done(null, account);
@@ -635,7 +638,7 @@ function createServer(options) {
             redisClient.ltrim('chatMessages', 0, 99);
             io.to('onlineAccounts').emit('chat', finalMsg);
           };
-          if (username == null) {
+          if (username === null) {
             Account
               .query()
               .where({id: accountId})
@@ -688,6 +691,7 @@ function createServer(options) {
                            npcCardPartyInfo: npcCardPartyInfos[1]
                           };
             socket.emit('battle', payload);
+            break;
           case 'requestPC':
             console.log('requestPC', battle);
             // battle.accountId
@@ -718,7 +722,7 @@ function createServer(options) {
     });
   });
 
-  process.on('SIGINT', function() {
+  function handleShutdown() {
     // TODO
     // not delete online data more one time.
     Promise.all([redisClient.delAsync('onlineAccountUsernames'),
@@ -731,43 +735,49 @@ function createServer(options) {
           });
         });
       });
-  });
+  }
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
   return http;
 }
 
 var cluster = require('cluster');
 var config = require('./config').server;
 var killable = require('killable');
-if (config.cluster.disable == false) {
+if (config.cluster.disable === false) {
   (function() {
     var workers = config.cluster.workers;
     var sticky = require('sticky-session');
-    var server = sticky(workers, createServer).listen(config.port, function() {
+    var server = sticky(workers, createApp).listen(config.port, function() {
       console.log('listening on *:'+config.port);
     });
     killable(server);
-    process.on('SIGINT', function() {
+    function handleShutdown() {
       if (cluster.isMaster) {
         server.kill(function() {
-          // TODO
-          // find better way for gracefully shutdown server and workers.
           setTimeout(function() {
             process.exit(0);
-          }, 1000);
+          }, 500);
         });
       }
-    });
+    }
+    process.on('SIGINT', handleShutdown);
+    process.on('SIGTERM', handleShutdown);
   }());
 } else {
   (function() {
-    var server = createServer().listen(config.port, function() {
+    var server = createApp().listen(config.port, function() {
       console.log('listening on *:'+config.port);
     });
     killable(server);
-    process.on('SIGINT', function() {
+    function handleShutdown() {
       server.kill(function() {
-        process.exit(0);
+        setTimeout(function() {
+          process.exit(0);
+        }, 500);
       });
-    });
+    }
+    process.on('SIGINT', handleShutdown);
+    process.on('SIGTERM', handleShutdown);
   }());
 }

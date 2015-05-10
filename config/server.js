@@ -1,19 +1,19 @@
 var serverConfig = {
   develop: {
     cluster: {
-      disable: false,
+      disable: true,
       workers: 2
     },
     port: process.env.PORT || 3000,
-    staticDirectory: ('client/dist')
+    staticDirectory: 'client/dist'
   },
   production: {
     cluster: {
-      disable: false,
-      workers: 2
+      disable: true,
+      workers: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2
     },
     port: process.env.PORT || 3000,
-    staticDirectory: ('public')
+    staticDirectory: 'public'
   }
 };
 

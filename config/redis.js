@@ -11,6 +11,7 @@ if (process.env.REDISCLOUD_URL) {
 
 var redisConfig = {
   develop: {
+    client: 'ioredis',
     port: 6379,
     hostanme: 'localhost',
     options: {
@@ -18,6 +19,7 @@ var redisConfig = {
     }
   },
   production: {
+    client: 'redis',
     port: (redisURL ? redisURL.port : 6379),
     hostname: (redisURL ? redisURL.hostname : 'localhost'),
     options: {
@@ -37,6 +39,9 @@ _config = Immutable.fromJS(_config);
 module.exports = {
   get: function() {
     return _config;
+  },
+  getClient: function() {
+    return _config.get('client');
   },
   getHostname: function() {
     return _config.get('hostname');
