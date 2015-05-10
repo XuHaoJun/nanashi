@@ -21,7 +21,7 @@
         "express-session": "^1.11.1",
         "hiredis": "^0.3.0",
         "immutable": "^3.7.2",
-        "ioredis": "^1.2.3",
+        "ioredis": "^1.2.4",
         "is_js": "^0.7.3",
         "killable": "^1.0.0",
         "knex": "^0.8.3",
@@ -31,8 +31,11 @@
         "passport-facebook": "^2.0.0",
         "passport-local": "^1.0.0",
         "pg": "^4.3.0",
-        "pg-native": "^1.8.0",
-        "socket.io": "^1.3.5"
+        "pg-native": "^1.8.1",
+        "redis": "^0.12.1",
+        "socket.io": "^1.3.5",
+        "socket.io-redis": "^0.1.4",
+        "sticky-session": "git+https://github.com/wzrdtales/sticky-session.git#layer4"
     },
     "devDependencies": {},
     "author": {

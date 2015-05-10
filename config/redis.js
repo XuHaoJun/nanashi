@@ -42,7 +42,7 @@ module.exports = {
     return _config.get('hostname');
   },
   getOptions: function() {
-    return _config.get('options');
+    return _config.get('options') || Immutable.Map({});
   },
   getPort: function() {
     return _config.get('port');
