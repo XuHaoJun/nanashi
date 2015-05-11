@@ -47,6 +47,12 @@ function createApp(options) {
 
   redisClient.on('error', console.log);
 
+  redisClient
+    .multi()
+    .del('onlineAccountUsernames')
+    .del('onlineAccountIds')
+    .exec();
+
   var knex = require('knex')(configs.db);
   var bookshelf = require('bookshelf')(knex);
 
@@ -54,22 +60,26 @@ function createApp(options) {
 
   var battleNPCs = {};
 
-  var npcCardPartyInfos = {
+  var npcs = {
     1: {
+      name: '神奇喵喵',
       cardPartyInfo:
       {
         name: '神級喵喵隊',
         cardParty:
         [
-          {name: 'hyperWiwi', hp: 1, atk: 1, def: 1, spd: 1, skill1_id: 1},
-          {name: 'superKiki', hp: 1, atk: 1, def: 1, spd: 1, skill1_id: 1},
-          {name: 'lowerDodo', hp: 1, atk: 1, def: 1, spd: 1, skill1_id: 1}
+          {name: 'hyperWiwi', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
+           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0},
+          {name: 'superKiki', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
+           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0},
+          {name: 'lowerDodo', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
+           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0}
         ]
       }
     }
   };
 
-  npcCardPartyInfos = Immutable.fromJS(npcCardPartyInfos);
+  npcs = Immutable.fromJS(npcs);
 
   var BaseCard = bookshelf.Model.extend({
     tableName: 'base_card',
@@ -159,19 +169,73 @@ function createApp(options) {
   }, {
     register: Promise.method(function(form) {
       return (
-        this
-          .forge(form)
-          .save()
-          .then(function(account) {
-            return CardPartyInfo.forge({'account_id': account.get('id')}).save();
-          }).then(function(cardPartyInfo) {
-            return (
-              Account
-                .where({id: cardPartyInfo.get('account_id')})
-                .fetch()
-            );
-          })
+        bookshelf.transaction(function(t) {
+          return (
+            this
+              .forge(form)
+              .save(null, {transacting: t})
+              .then(function(account) {
+                return (
+                  CardPartyInfo
+                    .forge({'account_id': account.get('id')})
+                    .save(null, {transacting: t})
+                );
+              }).tap(function(account) {
+                return account;
+              })
+          );
+        }.bind(this))
       );
+    }),
+    decomposeCard: Promise.method(function(form) {
+      var _cardCry = {
+        '鐵': 25,
+        '銅': 100,
+        '銀': 400,
+        '金': 1600
+      };
+      var cardId = form.cardId;
+      var accountId = form.accountId;
+      return bookshelf.transaction(function(t) {
+        var getCry;
+        return (
+          Card
+            .where({id: cardId, account_id: accountId})
+            .fetch({withRelated: ['baseCard'], transacting: t})
+            .then(function(card) {
+              getCry = _cardCry[card.related('baseCard').get('rea')];
+              return getCry;
+            }).then(function(getCry) {
+              return (
+                Account
+                  .where({id: accountId})
+                  .fetch({transacting: t})
+              );
+            }).then(function(account) {
+              return Account.forge({id: accountId}).save({cry: account.get('cry') + getCry},
+                                                         {transacting: t});
+            }).then(function(account) {
+              return (
+                CardParty
+                  .where('card_id', cardId)
+                  .fetch({transacting: t})
+              );
+            }).then(function(cardParty) {
+              if (cardParty !== null) {
+                return (
+                  CardParty
+                    .where('id', cardParty.get('id'))
+                    .destroy({transacting: t})
+                );
+              }
+              return null;
+            }).then(function() {
+              return Card.forge({id: cardId}).destroy({transacting: t});
+            }).then(function() {
+              return getCry;
+            })
+        );
+      });
     }),
     login: Promise.method(function(username, password, options) {
       options = options ? options : {};
@@ -312,6 +376,8 @@ function createApp(options) {
   apiRouter.post('/account/drawCard', isAuthenticated, function(req, res) {
     var accountId = req.user.accountId;
     var cardPrice = 1;
+    // TODO
+    // transacting it!
     Account
       .query()
       .where({id: accountId})
@@ -387,41 +453,14 @@ function createApp(options) {
       });
   });
 
-  var _cardCry = {
-    '鐵': 25,
-    '銅': 100,
-    '銀': 400,
-    '金': 1600
-  };
-
   apiRouter.post('/account/card/decompose', isAuthenticated, function(req, res) {
     var cardId = req.body.id;
     var accountId = req.user.accountId;
-    Card
-      .where({id: cardId, account_id: accountId})
-      .fetch({withRelated: ['baseCard']})
-      .then(function(card) {
-        var getCry = _cardCry[card.related('baseCard').get('rea')];
-        return getCry;
-      }).then(function(getCry) {
-        Account
-          .where({id: accountId})
-          .fetch()
-          .then(function(account) {
-            return Account.forge({id: accountId}).save({cry: account.get('cry') + getCry});
-          });
-        CardParty
-          .query()
-          .where('card_id', cardId)
-          .delete()
-          .then(function() {
-            Card.forge({id: cardId}).destroy();
-          });
+    Account
+      .decomposeCard({accountId: accountId, cardId: cardId})
+      .then(function(getCry) {
         res.json(getCry);
-      }).catch(function(err) {
-        console.log(err);
-        res.status(400).json({error: 'something wrong.'});
-      });
+      }).catch(console.log);
   });
 
   apiRouter.post('/account/card/levelUp', isAuthenticated, function(req, res) {
@@ -431,6 +470,8 @@ function createApp(options) {
       res.status(400).json({error: 'wrong form.'});
       return;
     }
+    // TODO
+    // transation and move to model
     var cardLevel = null;
     Card
       .where({id: cardId})
@@ -467,6 +508,8 @@ function createApp(options) {
       res.status(400).json({error: 'wrong form.'});
       return;
     }
+    // TODO
+    // transation and move to model
     CardParty.forge({id: cardPartyId})
       .destroy()
       .then(function() {
@@ -559,6 +602,8 @@ function createApp(options) {
       res.status(400).json({error: 'wrong form.'});
       return;
     }
+    // TODO
+    // transation and move to model
     Card
       .where({id: cardId})
       .fetch()
@@ -588,45 +633,21 @@ function createApp(options) {
 
   app.use('/api', apiRouter);
 
-  io.on('connection', function(socket){
-    var accountId = socket.request.session.passport.user;
-    if (!is.existy(accountId)) {
-      socket.disconnect();
-      return;
-    }
+  function handleAuthed(accountId, socket) {
     redisClient
-      .sismemberAsync('onlineAccountIds', accountId)
-      .then(function(result) {
-        var found = (result == 1);
-        if (found) {
-          socket.disconnect();
-          return;
+      .lrangeAsync('chatMessages', 0, -1)
+      .then(function(messages) {
+        if (messages.length > 0) {
+          socket.emit('chat', messages.reverse());
         }
-        socket.request.session.save();
-        redisClient.sadd('onlineAccountIds', accountId);
-        Account
-          .query()
-          .where({id: accountId})
-          .select('username')
-          .then(function(data) {
-            var username = data[0].username;
-            return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
-          }).catch(console.log);
-        redisClient
-          .lrangeAsync('chatMessages', 0, -1)
-          .then(function(messages) {
-            if(messages.length > 0 ) {
-              socket.emit('chat', messages.reverse());
-            }
-          }).catch(console.log);
-        socket.join('onlineAccounts');
-      }).catch(console.log);
+      });
+    socket.join('onlineAccounts');
     socket.on('disconnect', function() {
-      if (!is.existy(accountId)) {
-        return;
-      }
-      redisClient.srem('onlineAccountIds', accountId);
-      redisClient.hdel('onlineAccountUsernames', accountId);
+      redisClient
+        .multi()
+        .srem('onlineAccountIds', accountId)
+        .hdel('onlineAccountUsernames', accountId)
+        .exec();
     });
     socket.on('chat', function(msg) {
       redisClient
@@ -634,8 +655,11 @@ function createApp(options) {
         .then(function(username) {
           var sendMessage = function(username) {
             var finalMsg = username + ': ' + msg;
-            redisClient.lpush('chatMessages', finalMsg);
-            redisClient.ltrim('chatMessages', 0, 99);
+            redisClient
+              .multi()
+              .lpush('chatMessages', finalMsg)
+              .ltrim('chatMessages', 0, 99)
+              .exec();
             io.to('onlineAccounts').emit('chat', finalMsg);
           };
           if (username === null) {
@@ -657,69 +681,116 @@ function createApp(options) {
         }).catch(console.log);
     });
     socket.on('battle', function(battle) {
-      if (!is.existy(accountId)) {
-        socket.emit('battle', {error: 'something wrong.'});
-        return;
-      }
-      redisClient
-        .sismemberAsync('onlineAccountIds', accountId)
-        .then(function(result) {
-          var found = (result == 1);
-          if (found) {
-            return found;
-          }
-          throw new Error('Not found account');
-        }).then(function(found) {
-          switch(battle.type) {
-          case 'requestNPC':
-            console.log('requestNPC', battle);
-            // if (onlineBattlingAccountIds.indexOf(accountId)) {
-            //   socket.emit('battle', {error: 'you have one battle working.'});
-            //   return;
-            // }
-            var finalBattle = {
-              id: battleNPCs.length,
-              state: 'battling',
-              winer: null,
-              npcId: 1,
-              npcarCardPartyInfo: npcCardPartyInfos[1],
-              accountId: accountId
-            };
-            battleNPCs[battleNPCs.length](battle);
-            // onlineBattlingAccountIds.push(accountId);
-            var payload = {battleId: battle.id,
-                           npcCardPartyInfo: npcCardPartyInfos[1]
-                          };
-            socket.emit('battle', payload);
-            break;
-          case 'requestPC':
-            console.log('requestPC', battle);
-            // battle.accountId
-            break;
-          case 'useSkill':
-            // console.log('requestNPC', battle);
-            // battle.targetType 'PC', 'NPC'
-            // battle.id
-            // battle.skillId
-            // battle.targetId account's card id or npc card id
-            if (battle.targetType == 'NPC') {
-              var _battle = battleNPCs[battle.id];
-              if (!battle) {
-                socket.emit('battle', {error: 'battle not found.'});
-                return;
-              }
-            } else if (battle.targetType == 'PC') {
+      switch(battle.action) {
+      case 'requestNPC':
+        console.log('requestNPC', battle);
+        // check battle's form
+        redisClient
+          .hgetAsync('accountBattleIds', accountId)
+          .then(function(battleId) {
+            var found = (battleId !== null);
+            if (found) {
+              // TODO
+              // found current battle by id and send
+              // {
+              //   id: battleId
+              //   type: 'pc2npc_1v1'
+              //   updated_at
+              //   created_at:
+              //   num_round:
+              //   round_card_id: 1
+              //   round_player: 'npc' or 'pc'
+              //   npc_id: 1
+              //   account_id: accountId
+              //   npc_battle_card_party_info:
+              //   account_battle_card_party_info:
+              // }
+              return;
             }
-            break;
-          default:
-            // never run this.
-            // may disconnect it!
-            break;
+            // TODO
+            // should use mulit with set battleCounter and onlineAccountBattleids
+            redisClient
+              .getAsync('battleCounter')
+              .then(function(count) {
+                if (count == null) {
+                  count = 1;
+                  redisClient.set('battleCounter', count);
+                } else {
+                  redisClient.incr('battleCounter', count);
+                }
+                return count;
+              }).then(function(count) {
+                redisClient
+                  .hsetAsync('accountBattleIds', accountId, count)
+                  .then(function() {
+                    var payload = {
+                      id: count,
+                      npc: npcs.get(1)
+                    };
+                    socket.emit('battle', payload);
+                  });
+              }).catch(console.log);
+          }).catch(console.log);
+        break;
+      case 'requestPC':
+        console.log('requestPC', battle);
+        // battle.accountId
+        break;
+      case 'useSkill':
+        // console.log('requestNPC', battle);
+        // battle.targetType 'PC', 'NPC'
+        // battle.id
+        // battle.skillId
+        // battle.targetId account's card id or npc card id
+        if (battle.targetType == 'NPC') {
+          var _battle = battleNPCs[battle.id];
+          if (!battle) {
+            socket.emit('battle', {error: 'battle not found.'});
+            return;
           }
-        }).catch(function(err) {
-          socket.emit('battle', {error: 'something wrong.'});
-        });
+        } else if (battle.targetType == 'PC') {
+        }
+        break;
+      default:
+        // never run this.
+        // may disconnect it!
+        break;
+      }
     });
+  }
+
+  io.on('connection', function(socket){
+    var accountId = socket.request.session.passport.user;
+    if (!is.existy(accountId)) {
+      socket.disconnect();
+      return;
+    }
+    redisClient
+      .sismemberAsync('onlineAccountIds', accountId)
+      .then(function(result) {
+        var exists = (result == 1);
+        if (exists) {
+          socket.emit('_error', {error: 'duplicate connection.'});
+          socket.disconnect();
+          return;
+        }
+        redisClient
+          .saddAsync('onlineAccountIds', accountId)
+          .then(function() {
+            return (
+              Account
+                .query()
+                .where({id: accountId})
+                .select('username')
+            );
+          })
+          .then(function(column) {
+            var username = column[0].username;
+            return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
+          }).then(function() {
+            handleAuthed(accountId, socket);
+          }).catch(console.log);
+      }).catch(console.log);
   });
 
   function handleShutdown() {
