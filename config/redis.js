@@ -11,7 +11,7 @@ if (process.env.REDISCLOUD_URL) {
 
 var redisConfig = {
   develop: {
-    client: 'ioredis',
+    client: 'redis',
     port: 6379,
     hostanme: 'localhost',
     options: {

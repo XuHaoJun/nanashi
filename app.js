@@ -15,6 +15,7 @@ function createApp(options) {
   var passport = require('passport');
   var LocalStrategy = require('passport-local').Strategy;
   var FacebookStrategy = require('passport-facebook').Strategy;
+  var Scripto = require('redis-scripto');
   var redis;
   if (configs.redis.getClient() == 'ioredis') {
     redis = require("ioredis");
@@ -47,6 +48,10 @@ function createApp(options) {
 
   redisClient.on('error', console.log);
 
+  var rscript = new Scripto(redisClient);
+  rscript = Promise.promisifyAll(rscript);
+  rscript.loadFromDir(__dirname+'/redis-scripts');
+
   redisClient
     .multi()
     .del('onlineAccountUsernames')
@@ -63,17 +68,23 @@ function createApp(options) {
   var npcs = {
     1: {
       name: '神奇喵喵',
-      cardPartyInfo:
+      battleCardPartyInfo:
       {
         name: '神級喵喵隊',
         cardParty:
         [
-          {name: 'hyperWiwi', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
-           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0},
-          {name: 'superKiki', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
-           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0},
-          {name: 'lowerDodo', hp: 1, max_hp: 1, atk: 1, def: 1, spd: 1,
-           skill1_id: 1, skill2_id: 0, skill3_id: 0, skill4_id: 0}
+          {round_card_slot_index: 0, num_round: 0, npc_id: 1, round_player: 'NPC',
+           cardPartyInfoIndex: 0,
+           name: '宅弟-冠愉', hp: 2, max_hp: 2, atk: 1, def: 1, spd: 999,
+           skill1: 1, skill2: 0, skill3: 0, skill4: 0},
+          {round_card_slot_index: 1, num_round: 0, npc_id: 1, round_player: 'NPC',
+           cardPartyInfoIndex: 0,
+           name: '排骨宅-建勳', hp: 3, max_hp: 3, atk: 1, def: 1, spd: 998,
+           skill1: 1, skill2: 0, skill3: 0, skill4: 0},
+          {round_card_slot_index: 2, num_round: 0, npc_id: 1, round_player: 'NPC',
+           cardPartyInfoIndex: 0,
+           name: '肥宅-至剛', hp: 9, max_hp: 9, atk: 1, def: 1, spd: 997,
+           skill1: 1, skill2: 0, skill3: 0, skill4: 0}
         ]
       }
     }
@@ -109,6 +120,9 @@ function createApp(options) {
     },
     baseCard: function() {
       return this.belongsTo(BaseCard, 'base_card_id');
+    },
+    battlePC2NPC1v1: function() {
+      return this.hasOne(BattlePC2NPC1v1, 'round_card_id');
     }
   });
 
@@ -165,6 +179,9 @@ function createApp(options) {
     },
     cardPartyInfo: function() {
       return this.hasMany(CardPartyInfo, 'account_id');
+    },
+    battlePC2NPC1v1: function() {
+      return this.hasOne(BattlePC2NPC1v1, 'account_id');
     }
   }, {
     register: Promise.method(function(form) {
@@ -251,6 +268,16 @@ function createApp(options) {
       return this.where(query)
         .fetch({require: true, withRelated: AccountAllRelation});
     })
+  });
+
+  var BattlePC2NPC1v1 = bookshelf.Model.extend({
+    tableName: 'battle_pc2npc_1v1',
+    account: function() {
+      return this.belongsTo(Account, 'account_id');
+    },
+    roundCard: function() {
+      return this.belongsTo(Card, 'round_card_id');
+    }
   });
 
   passport.use(new LocalStrategy(
@@ -642,24 +669,14 @@ function createApp(options) {
         }
       });
     socket.join('onlineAccounts');
-    socket.on('disconnect', function() {
-      redisClient
-        .multi()
-        .srem('onlineAccountIds', accountId)
-        .hdel('onlineAccountUsernames', accountId)
-        .exec();
-    });
     socket.on('chat', function(msg) {
       redisClient
         .hgetAsync('onlineAccountUsernames', accountId)
         .then(function(username) {
           var sendMessage = function(username) {
             var finalMsg = username + ': ' + msg;
-            redisClient
-              .multi()
-              .lpush('chatMessages', finalMsg)
-              .ltrim('chatMessages', 0, 99)
-              .exec();
+            redisClient.lpush('chatMessages', finalMsg);
+            redisClient.ltrim('chatMessages', 0, 99);
             io.to('onlineAccounts').emit('chat', finalMsg);
           };
           if (username === null) {
@@ -680,20 +697,20 @@ function createApp(options) {
           }
         }).catch(console.log);
     });
-    socket.on('battle', function(battle) {
-      switch(battle.action) {
+    socket.on('battle', function(payload) {
+      switch(payload.action) {
       case 'requestNPC':
-        console.log('requestNPC', battle);
-        // check battle's form
+        console.log('requestNPC', payload);
+        // check payload's form
         redisClient
-          .hgetAsync('accountBattleIds', accountId)
+          .hgetAsync('account:battlePC2NPC1v1', accountId)
           .then(function(battleId) {
             var found = (battleId !== null);
             if (found) {
               // TODO
-              // found current battle by id and send
+              // found current payload by id and send
               // {
-              //   id: battleId
+              //   id: payloadId
               //   type: 'pc2npc_1v1'
               //   updated_at
               //   created_at:
@@ -702,54 +719,83 @@ function createApp(options) {
               //   round_player: 'npc' or 'pc'
               //   npc_id: 1
               //   account_id: accountId
-              //   npc_battle_card_party_info:
-              //   account_battle_card_party_info:
+              //   npc_payload_card_party_info:
+              //   account_payload_card_party_info:
               // }
               return;
             }
-            // TODO
-            // should use mulit with set battleCounter and onlineAccountBattleids
-            redisClient
-              .getAsync('battleCounter')
-              .then(function(count) {
-                if (count == null) {
-                  count = 1;
-                  redisClient.set('battleCounter', count);
-                } else {
-                  redisClient.incr('battleCounter', count);
-                }
-                return count;
-              }).then(function(count) {
-                redisClient
-                  .hsetAsync('accountBattleIds', accountId, count)
-                  .then(function() {
-                    var payload = {
-                      id: count,
-                      npc: npcs.get(1)
-                    };
-                    socket.emit('battle', payload);
-                  });
+            function toAccountBattleCardPartyInfo(cardPartyInfo) {
+              var bcpi = {
+                name: cardPartyInfo.name
+              };
+              var cardParty = _.sortBy(cardPartyInfo.cardParty, function(cp) {
+                return cp.slot_index;
+              });
+              for(var i = 0; i<cardParty.length; i++) {
+                var cp = cardParty[i];
+                cp.cardPartyInfoIndex = 0;
+                cp.round_card_slot_index = i;
+                cp.round_player = 'PC';
+                cp.max_hp = (cp.card.hp_effort * 3) + cp.card.baseCard.hp;
+                cp.hp = cp.max_hp;
+                cp.spd = (cp.card.spd_effort * 3) + cp.card.baseCard.spd;
+                cp.num_round = 0;
+                cp.atk = (cp.card.atk_effort * 3) + cp.card.baseCard.atk;
+                cp.def = (cp.card.def_effort * 3) + cp.card.baseCard.def;
+                cp.base_card_id = cp.card.base_card_id;
+                cp.account_id = cp.card.account_id;
+                cp.level = cp.card.level;
+                cp.name = cp.card.baseCard.name;
+                cp.skill1 = cp.card.skill1;
+                cp.skill2 = cp.card.skill2;
+                cp.skill3 = cp.card.skill3;
+                cp.skill4 = cp.card.skill4;
+                delete cp.card;
+              }
+              bcpi.cardParty = cardParty;
+              return bcpi;
+            }
+            Account
+              .where('id', accountId)
+              .fetch({
+                withRelated: ['cardPartyInfo', 'cardPartyInfo.cardParty',
+                              'cardPartyInfo.cardParty.card',
+                              'cardPartyInfo.cardParty.card.baseCard']})
+              .then(function(account) {
+                var battlePC2NPC1v1 = {
+                  num_round: 0,
+                  npc_id: payload.npcId,
+                  account_id: accountId
+                };
+                var cardPartyInfo = account.related('cardPartyInfo').toJSON();
+                var accountBattleCardPartyInfo = toAccountBattleCardPartyInfo(cardPartyInfo[0]);
+                var npcBattleCardPartyInfo = npcs.get(payload.npcId).get('battleCardPartyInfo').toJSON();
+                battlePC2NPC1v1.accountBattleCardPartyInfo = accountBattleCardPartyInfo;
+                battlePC2NPC1v1.npcBattleCardPartyInfo = npcBattleCardPartyInfo;
+                var mergedCardParty = _.take(accountBattleCardPartyInfo.cardParty, 3)
+                      .concat(_.take(npcBattleCardPartyInfo.cardParty, 3));
+                mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
+                var mergedCardPartyOrder = _.map(mergedCardParty, function(card) {
+                  return {
+                    spd: card.spd,
+                    round_player: card.round_player,
+                    round_card_slot_index: card.round_card_slot_index,
+                    num_round: card.num_round
+                  };
+                });
+                socket.emit('battle',
+                            {action: 'initialize',
+                             battlePC2NPC1v1: battlePC2NPC1v1
+                            });
+                battlePC2NPC1v1.merged_card_party_order = mergedCardPartyOrder;
               }).catch(console.log);
           }).catch(console.log);
         break;
       case 'requestPC':
-        console.log('requestPC', battle);
-        // battle.accountId
+        console.log('requestPC', payload);
+        // payload.accountId
         break;
-      case 'useSkill':
-        // console.log('requestNPC', battle);
-        // battle.targetType 'PC', 'NPC'
-        // battle.id
-        // battle.skillId
-        // battle.targetId account's card id or npc card id
-        if (battle.targetType == 'NPC') {
-          var _battle = battleNPCs[battle.id];
-          if (!battle) {
-            socket.emit('battle', {error: 'battle not found.'});
-            return;
-          }
-        } else if (battle.targetType == 'PC') {
-        }
+      case 'useSkills':
         break;
       default:
         // never run this.
@@ -765,32 +811,34 @@ function createApp(options) {
       socket.disconnect();
       return;
     }
-    redisClient
-      .sismemberAsync('onlineAccountIds', accountId)
+    socket.on('disconnect', function() {
+      console.log('disconnect', accountId);
+      redisClient
+        .multi()
+        .setbit('onlineAccountIds', accountId, 0)
+        .hdel('onlineAccountUsernames', accountId)
+        .exec();
+    });
+    rscript.runAsync('checkAndSet', ['onlineAccountIds'], [accountId])
       .then(function(result) {
-        var exists = (result == 1);
+        var exists = (result === null);
         if (exists) {
           socket.emit('_error', {error: 'duplicate connection.'});
           socket.disconnect();
           return;
         }
-        redisClient
-          .saddAsync('onlineAccountIds', accountId)
-          .then(function() {
-            return (
-              Account
-                .query()
-                .where({id: accountId})
-                .select('username')
-            );
-          })
+        handleAuthed(accountId, socket);
+        Account
+          .query()
+          .where({id: accountId})
+          .select('username')
           .then(function(column) {
             var username = column[0].username;
             return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
-          }).then(function() {
-            handleAuthed(accountId, socket);
           }).catch(console.log);
-      }).catch(console.log);
+      }).catch(function(err) {
+        console.log(err);
+      });
   });
 
   function handleShutdown() {
