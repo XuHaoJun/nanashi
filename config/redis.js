@@ -4,9 +4,18 @@ var url = require('url');
 var redisURL;
 
 var auth_pass = null;
-if (process.env.REDISCLOUD_URL) {
-  redisURL = url.parse(process.env.REDISCLOUD_URL);
-  auth_pass = redisURL.auth.split(":")[1];
+var _redisURL;
+var _redisURLs = {
+  heroku: process.env.REDIS_URL,
+  redisColud: process.env.REDISCLOUD_URL
+};
+
+if (_redisURLs.heroku) {
+  _redisURL = url.parse(_redisURLs.heroku);
+  auth_pass = _redisURL.auth.split(":")[1];
+} else if(_redisURLs.redisColud) {
+  _redisURL = url.parse(_redisURLs.redisColud);
+  auth_pass = _redisURL.auth.split(":")[1];
 }
 
 var redisConfig = {
@@ -15,15 +24,16 @@ var redisConfig = {
     port: 6379,
     hostanme: 'localhost',
     options: {
-      no_ready_check: true
+      detect_buffers: true
     }
   },
   production: {
     client: 'redis',
-    port: (redisURL ? redisURL.port : 6379),
-    hostname: (redisURL ? redisURL.hostname : 'localhost'),
+    port: (_redisURL ? _redisURL.port : 6379),
+    hostname: (_redisURL ? _redisURL.hostname : 'localhost'),
     options: {
       auth_pass: auth_pass,
+      detect_buffers: true,
       no_ready_check: true
     }
   }

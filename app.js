@@ -1,12 +1,14 @@
+var logger = require('bunyan').createLogger({name: require('./config').server.appName});
+
 function createApp(options) {
   options = options ? options : {};
+  var BufferList = require('bl');
   var configs = require('./config');
   var Immutable = require('immutable');
   var Promise  = require('bluebird');
   var _ = require('lodash');
   var is = require('is_js');
   var checkit = require('checkit');
-  var logger = require('morgan');
   var compress = require('compression');
   var express = require('express');
   var expressSession = require('express-session');
@@ -16,6 +18,7 @@ function createApp(options) {
   var LocalStrategy = require('passport-local').Strategy;
   var FacebookStrategy = require('passport-facebook').Strategy;
   var Scripto = require('redis-scripto');
+  var msgpack = require('msgpack5')();
   var redis;
   if (configs.redis.getClient() == 'ioredis') {
     redis = require("ioredis");
@@ -46,7 +49,7 @@ function createApp(options) {
                                        configs.redis.getOptions().toJSON());
   redisClient =  Promise.promisifyAll(redisClient);
 
-  redisClient.on('error', console.log);
+  redisClient.on('error', logger.info);
 
   var rscript = new Scripto(redisClient);
   rscript = Promise.promisifyAll(rscript);
@@ -73,17 +76,17 @@ function createApp(options) {
         name: '神級喵喵隊',
         cardParty:
         [
-          {round_card_slot_index: 0, num_round: 0, npc_id: 1, round_player: 'NPC',
+          {round_card_slot_index: 0, npc_id: 1, round_player: 'NPC',
            cardPartyInfoIndex: 0,
-           name: '宅弟-冠愉', hp: 2, max_hp: 2, atk: 1, def: 1, spd: 999,
+           name: '宅弟-冠愉', hp: 2, max_hp: 2, atk: 1, def: 1, spd: 1,
            skill1: 1, skill2: 0, skill3: 0, skill4: 0},
-          {round_card_slot_index: 1, num_round: 0, npc_id: 1, round_player: 'NPC',
+          {round_card_slot_index: 1, npc_id: 1, round_player: 'NPC',
            cardPartyInfoIndex: 0,
-           name: '排骨宅-建勳', hp: 3, max_hp: 3, atk: 1, def: 1, spd: 998,
+           name: '排骨宅-建勳', hp: 3, max_hp: 3, atk: 1, def: 1, spd: 10,
            skill1: 1, skill2: 0, skill3: 0, skill4: 0},
-          {round_card_slot_index: 2, num_round: 0, npc_id: 1, round_player: 'NPC',
+          {round_card_slot_index: 2, npc_id: 1, round_player: 'NPC',
            cardPartyInfoIndex: 0,
-           name: '肥宅-至剛', hp: 9, max_hp: 9, atk: 1, def: 1, spd: 997,
+           name: '肥宅-至剛', hp: 9, max_hp: 9, atk: 1, def: 1, spd: 999,
            skill1: 1, skill2: 0, skill3: 0, skill4: 0}
         ]
       }
@@ -254,14 +257,16 @@ function createApp(options) {
         );
       });
     }),
-    login: Promise.method(function(username, password, options) {
+    loginByOauth: Promise.method(function(providerName, id) {
+      var query = {username: providerName+':'+id};
+      return this.where(query).fetch({require: true});
+    }),
+    loginByLocal: Promise.method(function(username, password) {
+      // TODO
+      // check facebok:xxxx
       options = options ? options : {};
       var query = {username: username, password: password};
-      if (options.noRelation) {
-        return this.where(query).fetch({require: true});
-      }
-      return this.where(query)
-        .fetch({require: true, withRelated: AccountAllRelation});
+      return this.where(query).fetch({require: true});
     }),
     getAll: Promise.method(function(accountId) {
       var query = {id: accountId};
@@ -282,10 +287,7 @@ function createApp(options) {
 
   passport.use(new LocalStrategy(
     function(username, password, done) {
-      // TODO
-      // check facebok-xxxx
-      Account
-        .login(username, password, {noRelation: true})
+      Account.loginByLocal(username, password)
         .then(function(account) {
           done(null, account);
         }).catch(function(err) {
@@ -297,8 +299,7 @@ function createApp(options) {
   if (configs.oauth2.facebook) {
     passport.use(new FacebookStrategy(configs.oauth2.facebook, function(accessToken, refreshToken, profile, done) {
       Account
-        .where({username: 'facebook-'+profile.id})
-        .fetch({require: true})
+        .loginByOauth('facebook', profile.id)
         .then(function(account) {
           done(null, account);
         }).catch(Account.NotFoundError, function() {
@@ -348,7 +349,17 @@ function createApp(options) {
 
   app.use(compress());
 
-  app.use(logger('dev'));
+  app.use(require('express-request-id')());
+
+  app.use(require('express-bunyan-logger')({
+    genReqId: function(req) {
+      return req.id;
+    },
+    name: configs.server.appName
+  }));
+  app.use(require('express-bunyan-logger').errorLogger({
+    name: configs.server.appName
+  }));
 
   var session;
   if (configs.session.store.client == 'redis') {
@@ -480,17 +491,17 @@ function createApp(options) {
       });
   });
 
-  apiRouter.post('/account/card/decompose', isAuthenticated, function(req, res) {
+  apiRouter.post('/account/cardDecompose', isAuthenticated, function(req, res) {
     var cardId = req.body.id;
     var accountId = req.user.accountId;
     Account
       .decomposeCard({accountId: accountId, cardId: cardId})
       .then(function(getCry) {
         res.json(getCry);
-      }).catch(console.log);
+      }).catch(logger.info);
   });
 
-  apiRouter.post('/account/card/levelUp', isAuthenticated, function(req, res) {
+  apiRouter.post('/account/cardLevelUp', isAuthenticated, function(req, res) {
     var cardId = req.body.id;
     var accountId = req.user.accountId;
     if (!cardId) {
@@ -523,7 +534,7 @@ function createApp(options) {
         res.json(true);
         return Card.forge({id: cardId}).save({level: cardLevel + 1});
       }).catch(function(err) {
-        console.log(err);
+        logger.info(err);
         res.status(400).json({error: 'something wrong.'});
       });
   });
@@ -653,7 +664,7 @@ function createApp(options) {
         res.json(true);
         Card.forge({id: cardId}).save(final);
       }).catch(function(err) {
-        console.log(err);
+        logger.info(err);
         res.status(400).json({error: 'something wrong.'});
       });
   });
@@ -669,6 +680,7 @@ function createApp(options) {
         }
       });
     socket.join('onlineAccounts');
+    logger.info({accountId: accountId}, 'socket.io loign');
     socket.on('chat', function(msg) {
       redisClient
         .hgetAsync('onlineAccountUsernames', accountId)
@@ -678,6 +690,7 @@ function createApp(options) {
             redisClient.lpush('chatMessages', finalMsg);
             redisClient.ltrim('chatMessages', 0, 99);
             io.to('onlineAccounts').emit('chat', finalMsg);
+            logger.info({accountId: accountId, finalMessage: finalMsg}, 'chat');
           };
           if (username === null) {
             Account
@@ -690,38 +703,28 @@ function createApp(options) {
                 sendMessage(username);
               })
               .catch(function(err) {
-                console.log(err);
+                logger.info(err);
               });
           } else {
             sendMessage(username);
           }
-        }).catch(console.log);
+        }).catch(logger.info);
     });
     socket.on('battle', function(payload) {
       switch(payload.action) {
       case 'requestNPC':
-        console.log('requestNPC', payload);
         // check payload's form
+        logger.info({accountId: accountId, payload: payload}, 'battle:requestNPC');
         redisClient
-          .hgetAsync('account:battlePC2NPC1v1', accountId)
-          .then(function(battleId) {
-            var found = (battleId !== null);
+          .hget(new Buffer('account:battlePC2NPC1v1'), accountId, function(err, battle) {
+            var found = (battle !== null);
             if (found) {
-              // TODO
-              // found current payload by id and send
-              // {
-              //   id: payloadId
-              //   type: 'pc2npc_1v1'
-              //   updated_at
-              //   created_at:
-              //   num_round:
-              //   round_card_id: 1
-              //   round_player: 'npc' or 'pc'
-              //   npc_id: 1
-              //   account_id: accountId
-              //   npc_payload_card_party_info:
-              //   account_payload_card_party_info:
-              // }
+              battle = msgpack.decode(battle);
+              delete battle.mergedCardParty;
+              socket.emit('battle',
+                          {action: 'initialize',
+                           battlePC2NPC1v1: battle
+                          });
               return;
             }
             function toAccountBattleCardPartyInfo(cardPartyInfo) {
@@ -739,7 +742,6 @@ function createApp(options) {
                 cp.max_hp = (cp.card.hp_effort * 3) + cp.card.baseCard.hp;
                 cp.hp = cp.max_hp;
                 cp.spd = (cp.card.spd_effort * 3) + cp.card.baseCard.spd;
-                cp.num_round = 0;
                 cp.atk = (cp.card.atk_effort * 3) + cp.card.baseCard.atk;
                 cp.def = (cp.card.def_effort * 3) + cp.card.baseCard.def;
                 cp.base_card_id = cp.card.base_card_id;
@@ -772,30 +774,112 @@ function createApp(options) {
                 var npcBattleCardPartyInfo = npcs.get(payload.npcId).get('battleCardPartyInfo').toJSON();
                 battlePC2NPC1v1.accountBattleCardPartyInfo = accountBattleCardPartyInfo;
                 battlePC2NPC1v1.npcBattleCardPartyInfo = npcBattleCardPartyInfo;
-                var mergedCardParty = _.take(accountBattleCardPartyInfo.cardParty, 3)
-                      .concat(_.take(npcBattleCardPartyInfo.cardParty, 3));
-                mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
-                var mergedCardPartyOrder = _.map(mergedCardParty, function(card) {
-                  return {
-                    spd: card.spd,
-                    round_player: card.round_player,
-                    round_card_slot_index: card.round_card_slot_index,
-                    num_round: card.num_round
-                  };
-                });
                 socket.emit('battle',
                             {action: 'initialize',
                              battlePC2NPC1v1: battlePC2NPC1v1
                             });
-                battlePC2NPC1v1.merged_card_party_order = mergedCardPartyOrder;
-              }).catch(console.log);
-          }).catch(console.log);
+                var mergedCardParty = _.take(accountBattleCardPartyInfo.cardParty, 3)
+                      .concat(_.take(npcBattleCardPartyInfo.cardParty, 3));
+                mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
+                battlePC2NPC1v1.mergedCardParty = mergedCardParty;
+                var packedBattle = msgpack.encode(battlePC2NPC1v1);
+                redisClient.hset('account:battlePC2NPC1v1', accountId, packedBattle);
+              }).catch(logger.info);
+          });
         break;
       case 'requestPC':
-        console.log('requestPC', payload);
         // payload.accountId
         break;
-      case 'useSkills':
+      case 'useSkillsByPC':
+        logger.info({accountId: accountId, payload: payload}, 'battle:userSkillsByPC');
+        redisClient
+          .hgetAsync(new Buffer('account:'+payload.battleType), accountId)
+          .then(function(battle) {
+            var found = (battle !== null);
+            if (!found) {
+              // should throw error
+              return;
+            }
+            battle = msgpack.decode(battle);
+            var npcCardParty = battle.npcBattleCardPartyInfo.cardParty;
+            var accountCardParty = battle.accountBattleCardPartyInfo.cardParty;
+            var targetCardParty;
+            var useSkills = payload.prepareUseSkills;
+            var useSkill;
+            var mergedCardParty = battle.mergedCardParty;
+            var length = mergedCardParty.length;
+            var i;
+            var effectsQueue = [];
+            var target;
+            var effect;
+            var card;
+            var skillId;
+            for (i = 0; i<length; i++) {
+              card = mergedCardParty[i];
+              if (card.round_player === 'NPC') {
+                target = _.sample(_.take(accountCardParty, 3));
+                target.hp -= 1;
+                skillId = 1;
+                effect = {
+                  skillId:skillId,
+                  user: {
+                    round_player: card.round_player,
+                    round_card_slot_index: card.round_card_slot_index
+                  },
+                  effects: [
+                    {
+                      hp: {
+                        $dec: {
+                          value: 1,
+                          target: {round_player: target.round_player,
+                                   round_card_slot_index: target.round_card_slot_index}
+                        }
+                      }
+                    }
+                  ]
+                };
+                effectsQueue.push(effect);
+              } else if(card.round_player === 'PC') {
+                useSkill = _.find(useSkills, function(us) {
+                  return us.round_card_slot_index == card.round_card_slot_index;
+                });
+                skillId = useSkill.skillId;
+                targetCardParty = (useSkill.target.round_player === 'NPC' ? npcCardParty : accountCardParty);
+                target = targetCardParty[useSkill.target.round_card_slot_index];
+                target.hp -= 1;
+                effect = {
+                  skillId:skillId,
+                  user: {
+                    round_player: card.round_player,
+                    round_card_slot_index: card.round_card_slot_index
+                  },
+                  effects: [
+                    {
+                      hp: {
+                        $dec: {
+                          value: 1,
+                          target: {round_player: target.round_player,
+                                   round_card_slot_index: target.round_card_slot_index}
+                        }
+                      }
+                    }
+                  ]
+                };
+                effectsQueue.push(effect);
+              }
+            }
+            battle.num_round += 1;
+            var packedBattle = msgpack.encode(battle);
+            redisClient
+              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle)
+              .then(function() {
+                socket.emit('battle', {
+                  action: 'handleEffectsQueue',
+                  battleType: 'battlePC2NPC1v1',
+                  effectsQueue: effectsQueue
+                });
+              }).catch(console.log);
+          });
         break;
       default:
         // never run this.
@@ -812,7 +896,9 @@ function createApp(options) {
       return;
     }
     socket.on('disconnect', function() {
-      console.log('disconnect', accountId);
+      if (is.existy(accountId)) {
+        logger.info({accountId: accountId}, 'socket.io:disconected');
+      }
       redisClient
         .multi()
         .setbit('onlineAccountIds', accountId, 0)
@@ -848,9 +934,9 @@ function createApp(options) {
                  redisClient.delAsync('onlineAccountIds')])
       .then(function() {
         redisClient.quit(function(err, result) {
-          console.log('redis client quit');
+          logger.info('redis client quit');
           knex.destroy(function() {
-            console.log('knex destroy');
+            logger.info('knex destroy');
           });
         });
       });
@@ -863,20 +949,24 @@ function createApp(options) {
 var cluster = require('cluster');
 var config = require('./config').server;
 var killable = require('killable');
+
+function handleStartServer() {
+  logger.info(config, 'server:start');
+}
+
 if (config.cluster.disable === false) {
   (function() {
     var workers = config.cluster.workers;
     var sticky = require('sticky-session');
-    var server = sticky(workers, createApp).listen(config.port, function() {
-      console.log('listening on *:'+config.port);
-    });
+    var server = sticky(workers, createApp).listen(config.port, handleStartServer);
     killable(server);
     function handleShutdown() {
       if (cluster.isMaster) {
         server.kill(function() {
+          logger.info('server:shutdown');
           setTimeout(function() {
             process.exit(0);
-          }, 500);
+          }, 350);
         });
       }
     }
@@ -885,15 +975,14 @@ if (config.cluster.disable === false) {
   }());
 } else {
   (function() {
-    var server = createApp().listen(config.port, function() {
-      console.log('listening on *:'+config.port);
-    });
+    var server = createApp().listen(config.port, handleStartServer);
     killable(server);
     function handleShutdown() {
       server.kill(function() {
+        logger.info('server:shutdown');
         setTimeout(function() {
           process.exit(0);
-        }, 500);
+        }, 350);
       });
     }
     process.on('SIGINT', handleShutdown);

@@ -1,5 +1,8 @@
+var os = require("os");
 var serverConfig = {
   develop: {
+    appName: 'nanashi-test',
+    hostname: os.hostname(),
     cluster: {
       disable: true,
       workers: 2
@@ -8,6 +11,8 @@ var serverConfig = {
     staticDirectory: 'client/dist'
   },
   production: {
+    appName: 'nanashi',
+    hostname: os.hostname(),
     cluster: {
       disable: true,
       workers: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2
