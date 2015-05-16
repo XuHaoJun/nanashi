@@ -12,8 +12,8 @@ var dbConfig = {
     pg: {
       connection: 'postgres://postgres:postgres@localhost/nanashi',
       pool: {
-        min: 1,
-        max: 1
+        min: 0,
+        max: 2
       }
     }
   },
@@ -22,8 +22,8 @@ var dbConfig = {
     pg: {
       connection: process.env.HEROKU_POSTGRESQL_TEAL_URL,
       pool: {
-        min: 1,
-        max: 1
+        min: 0,
+        max: 2
       }
     }
   }
