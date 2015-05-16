@@ -1,24 +1,22 @@
-var logger = require('bunyan').createLogger({name: require('./config').server.appName});
+var logger = require('./config/logger');
 
 function createApp(options) {
   options = options ? options : {};
   var BufferList = require('bl');
   var configs = require('./config');
-  var Immutable = require('immutable');
   var Promise  = require('bluebird');
   var _ = require('lodash');
   var is = require('is_js');
-  var checkit = require('checkit');
   var compress = require('compression');
   var express = require('express');
   var expressSession = require('express-session');
   var RedisStore = require('connect-redis')(expressSession);
   var bodyParser = require('body-parser');
-  var passport = require('passport');
-  var LocalStrategy = require('passport-local').Strategy;
-  var FacebookStrategy = require('passport-facebook').Strategy;
   var Scripto = require('redis-scripto');
   var msgpack = require('msgpack5')();
+  var models = require('./app/models');
+  var knex = models.knex;
+  var bookshelf = models.bookshelf;
   var redis;
   if (configs.redis.getClient() == 'ioredis') {
     redis = require("ioredis");
@@ -55,292 +53,13 @@ function createApp(options) {
   rscript = Promise.promisifyAll(rscript);
   rscript.loadFromDir(__dirname+'/redis-scripts');
 
+  // TODO
+  // should check online node clusters
   redisClient
     .multi()
     .del('onlineAccountUsernames')
     .del('onlineAccountIds')
     .exec();
-
-  var knex = require('knex')(configs.db);
-  var bookshelf = require('bookshelf')(knex);
-
-  // var onlineBattlingAccountIds = [];
-
-  var battleNPCs = {};
-
-  var npcs = {
-    1: {
-      name: '神奇喵喵',
-      battleCardPartyInfo:
-      {
-        name: '神級喵喵隊',
-        cardParty:
-        [
-          {round_card_slot_index: 0, npc_id: 1, round_player: 'NPC',
-           cardPartyInfoIndex: 0,
-           name: '宅弟-冠愉', hp: 2, max_hp: 2, atk: 1, def: 1, spd: 1,
-           skill1: 1, skill2: 0, skill3: 0, skill4: 0},
-          {round_card_slot_index: 1, npc_id: 1, round_player: 'NPC',
-           cardPartyInfoIndex: 0,
-           name: '排骨宅-建勳', hp: 3, max_hp: 3, atk: 1, def: 1, spd: 10,
-           skill1: 1, skill2: 0, skill3: 0, skill4: 0},
-          {round_card_slot_index: 2, npc_id: 1, round_player: 'NPC',
-           cardPartyInfoIndex: 0,
-           name: '肥宅-至剛', hp: 9, max_hp: 9, atk: 1, def: 1, spd: 999,
-           skill1: 1, skill2: 0, skill3: 0, skill4: 0}
-        ]
-      }
-    }
-  };
-
-  npcs = Immutable.fromJS(npcs);
-
-  var BaseCard = bookshelf.Model.extend({
-    tableName: 'base_card',
-    cards: function() {
-      return this.hasMany(Card, 'base_card_id');
-    }
-  });
-
-  var CardCreatingRules = {
-    account_id: ['required', 'integer', 'min:1'],
-    base_card_id: ['required', 'integer', 'min:1']
-  };
-
-  var Card = bookshelf.Model.extend({
-    tableName: 'card',
-    initialize: function() {
-      this.on('creating', this.validateCreating);
-    },
-    validateCreating: function() {
-      return checkit(CardCreatingRules).run(this.attributes);
-    },
-    cardParty: function() {
-      return this.hasMany(CardParty, 'card_id');
-    },
-    account: function() {
-      return this.belongsTo(Account, 'account_id');
-    },
-    baseCard: function() {
-      return this.belongsTo(BaseCard, 'base_card_id');
-    },
-    battlePC2NPC1v1: function() {
-      return this.hasOne(BattlePC2NPC1v1, 'round_card_id');
-    }
-  });
-
-  var CardParty = bookshelf.Model.extend({
-    tableName: 'card_party',
-    card: function() {
-      return this.belongsTo(Card, 'card_id');
-    },
-    cardPartyInfo: function() {
-      return this.belongsTo(CardPartyInfo, 'card_party_info_id');
-    }
-  });
-
-  var CardPartyInfo = bookshelf.Model.extend({
-    tableName: 'card_party_info',
-    account: function() {
-      return this.belongsTo(Account, 'account_id');
-    },
-    cardParty: function() {
-      return this.hasMany(CardParty, 'card_party_info_id');
-    }
-  });
-
-  var AccountCreatingRules = {
-    username: ['required', 'minLength:4', 'maxLength:24', function(val) {
-      return knex('account').where('username', '=', val).then(function(resp) {
-        if (resp.length > 0) throw new Error('The username is already in use.');
-      });
-    }],
-    password: ['required', 'minLength:4', 'maxLength:24'],
-    email: ['required', 'email', function(val) {
-      return knex('account').where('email', '=', val).then(function(resp) {
-        if (resp.length > 0) throw new Error('The email address is already in use.');
-      });
-    }]
-  };
-
-  var AccountAllRelation = ['deck',
-                            'deck.baseCard',
-                            'cardPartyInfo', 'cardPartyInfo.cardParty',
-                            'cardPartyInfo.cardParty.card',
-                            'cardPartyInfo.cardParty.card.baseCard'];
-
-  var Account = bookshelf.Model.extend({
-    tableName: 'account',
-    initialize: function() {
-      this.on('creating', this.validateCreating);
-    },
-    validateCreating: function() {
-      return checkit(AccountCreatingRules).run(this.attributes);
-    },
-    deck: function() {
-      return this.hasMany(Card);
-    },
-    cardPartyInfo: function() {
-      return this.hasMany(CardPartyInfo, 'account_id');
-    },
-    battlePC2NPC1v1: function() {
-      return this.hasOne(BattlePC2NPC1v1, 'account_id');
-    }
-  }, {
-    register: Promise.method(function(form) {
-      return (
-        bookshelf.transaction(function(t) {
-          return (
-            this
-              .forge(form)
-              .save(null, {transacting: t})
-              .then(function(account) {
-                return (
-                  CardPartyInfo
-                    .forge({'account_id': account.get('id')})
-                    .save(null, {transacting: t})
-                );
-              }).tap(function(account) {
-                return account;
-              })
-          );
-        }.bind(this))
-      );
-    }),
-    decomposeCard: Promise.method(function(form) {
-      var _cardCry = {
-        '鐵': 25,
-        '銅': 100,
-        '銀': 400,
-        '金': 1600
-      };
-      var cardId = form.cardId;
-      var accountId = form.accountId;
-      return bookshelf.transaction(function(t) {
-        var getCry;
-        return (
-          Card
-            .where({id: cardId, account_id: accountId})
-            .fetch({withRelated: ['baseCard'], transacting: t})
-            .then(function(card) {
-              getCry = _cardCry[card.related('baseCard').get('rea')];
-              return getCry;
-            }).then(function(getCry) {
-              return (
-                Account
-                  .where({id: accountId})
-                  .fetch({transacting: t})
-              );
-            }).then(function(account) {
-              return Account.forge({id: accountId}).save({cry: account.get('cry') + getCry},
-                                                         {transacting: t});
-            }).then(function(account) {
-              return (
-                CardParty
-                  .where('card_id', cardId)
-                  .fetch({transacting: t})
-              );
-            }).then(function(cardParty) {
-              if (cardParty !== null) {
-                return (
-                  CardParty
-                    .where('id', cardParty.get('id'))
-                    .destroy({transacting: t})
-                );
-              }
-              return null;
-            }).then(function() {
-              return Card.forge({id: cardId}).destroy({transacting: t});
-            }).then(function() {
-              return getCry;
-            })
-        );
-      });
-    }),
-    loginByOauth: Promise.method(function(providerName, id) {
-      var query = {username: providerName+':'+id};
-      return this.where(query).fetch({require: true});
-    }),
-    loginByLocal: Promise.method(function(username, password) {
-      // TODO
-      // check facebok:xxxx
-      options = options ? options : {};
-      var query = {username: username, password: password};
-      return this.where(query).fetch({require: true});
-    }),
-    getAll: Promise.method(function(accountId) {
-      var query = {id: accountId};
-      return this.where(query)
-        .fetch({require: true, withRelated: AccountAllRelation});
-    })
-  });
-
-  var BattlePC2NPC1v1 = bookshelf.Model.extend({
-    tableName: 'battle_pc2npc_1v1',
-    account: function() {
-      return this.belongsTo(Account, 'account_id');
-    },
-    roundCard: function() {
-      return this.belongsTo(Card, 'round_card_id');
-    }
-  });
-
-  passport.use(new LocalStrategy(
-    function(username, password, done) {
-      Account.loginByLocal(username, password)
-        .then(function(account) {
-          done(null, account);
-        }).catch(function(err) {
-          done(null, false);
-        });
-    }
-  ));
-
-  if (configs.oauth2.facebook) {
-    passport.use(new FacebookStrategy(configs.oauth2.facebook, function(accessToken, refreshToken, profile, done) {
-      Account
-        .loginByOauth('facebook', profile.id)
-        .then(function(account) {
-          done(null, account);
-        }).catch(Account.NotFoundError, function() {
-          var form = {username: 'facebook-' + profile.id,
-                      password: profile.id,
-                      email: profile.emails[0].value,
-                      account_provider_name: 'facebook'};
-          Account.register(form)
-            .then(function(account) {
-              done(null, account);
-            }).catch(function(err) {
-              done(err, null);
-            });
-        }).catch(function(err) {
-          done(err, null);
-        });
-    }));
-  }
-
-  passport.serializeUser(function(user, done) {
-    done(null, user.get('id'));
-  });
-
-  passport.deserializeUser(function(id, done) {
-    Account
-      .query()
-      .where({id: id})
-      .select('id')
-      .then(function() {
-        done(null, {accountId: id});
-      }).catch(function(err) {
-        done(err, null);
-      });
-  });
-
-  function isAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) {
-      return next();
-    }
-    return res.status(401).json({error: 'account not found.'});
-  }
 
   app.set('port', configs.server.port);
 
@@ -377,299 +96,10 @@ function createApp(options) {
 
   app.use(session);
 
-  app.use(passport.initialize());
-  app.use(passport.session());
+  app.use(require('./app/controllers').passport.initialize());
+  app.use(require('./app/controllers').passport.session());
 
-  if (configs.server.staticDirectory) {
-    app.use('/', express.static(configs.server.staticDirectory));
-  }
-
-  if (configs.oauth2.facebook) {
-    app.get('/auth/facebook', passport.authenticate('facebook', { scope: [ 'email' ] }));
-
-    app.get('/auth/facebook/callback', passport.authenticate('facebook'), function(req, res) {
-      res.redirect('/');
-    });
-  }
-
-  var apiRouter = express.Router();
-  apiRouter.get('/account/:id', function(req, res) {
-    var id = parseInt(req.params.id);
-    if (is.nan(id)) {
-      res.status(400).json({error: 'account get fail.'});
-      return;
-    }
-    Account
-      .where({id: id})
-      .fetch({withRelated: AccountAllRelation})
-      .then(function(account) {
-        account = account.toJSON();
-        delete(account.password);
-        res.json(account);
-      }).catch(function (err) {
-        res.status(400).json({error: 'account get fail.'});
-      });
-  });
-
-  apiRouter.post('/account/drawCard', isAuthenticated, function(req, res) {
-    var accountId = req.user.accountId;
-    var cardPrice = 1;
-    // TODO
-    // transacting it!
-    Account
-      .query()
-      .where({id: accountId})
-      .select('money')
-      .then(function(account) {
-        var money = account[0].money;
-        var finalMoney = money - cardPrice;
-        if (finalMoney < 0) {
-          throw new Error('money no enougth for draw card.');
-        }
-        return finalMoney;
-      }).then(function(finalMoney) {
-        return (
-          new Account({id: accountId})
-            .save({money: finalMoney}, {patch: true})
-        );
-      }).then(function(_account) {
-        return BaseCard.query().count();
-      }).then(function(column) {
-        var baseCardId = _.random(1, parseInt(column[0].count));
-        return (
-          BaseCard
-            .where({id: baseCardId})
-            .fetch()
-        );
-      }).then(function(baseCard) {
-        return (Card
-                .forge({account_id: accountId,
-                        base_card_id: baseCard.get('id'),
-                        skill1: baseCard.get('skill1'),
-                        skill2: baseCard.get('skill2'),
-                        skill3: baseCard.get('skill3'),
-                        skill4: baseCard.get('skill4')
-                       })
-                .save());
-      }).then(function(card) {
-        return (
-          Card.where({id: card.get('id')})
-            .fetch({withRelated: 'baseCard'})
-        );
-      }).then(function(card) {
-        res.json(card.toJSON());
-      }).catch(function(err) {
-        res.status(400).json({error: 'account draw card fail.'});
-      });
-  });
-
-  apiRouter.post('/account/register', function(req, res) {
-    Account
-      .register(req.body)
-      .then(function(account) {
-        var id = account.get('id');
-        req.session.passport = {user: id};
-        req.session.save();
-        res.json(id);
-      }).catch(function(err) {
-        res.status(400).json({error: 'account register fail.'});
-      });
-  });
-
-  apiRouter.get('/account', isAuthenticated, function(req, res) {
-    var accountId = req.user.accountId;
-    Account.getAll(accountId)
-      .then(function(account) {
-        account = account.toJSON();
-        delete(account.password);
-        res.json(account);
-      }).catch(Account.NotFoundError, function() {
-        // sholud never not found account, beacuse is Autogenerated!
-        res.status(401).json({error: 'account not found.'});
-      }).catch(function(err) {
-        res.status(400).json({error: 'something wrong.'});
-      });
-  });
-
-  apiRouter.post('/account/cardDecompose', isAuthenticated, function(req, res) {
-    var cardId = req.body.id;
-    var accountId = req.user.accountId;
-    Account
-      .decomposeCard({accountId: accountId, cardId: cardId})
-      .then(function(getCry) {
-        res.json(getCry);
-      }).catch(logger.info);
-  });
-
-  apiRouter.post('/account/cardLevelUp', isAuthenticated, function(req, res) {
-    var cardId = req.body.id;
-    var accountId = req.user.accountId;
-    if (!cardId) {
-      res.status(400).json({error: 'wrong form.'});
-      return;
-    }
-    // TODO
-    // transation and move to model
-    var cardLevel = null;
-    Card
-      .where({id: cardId})
-      .fetch()
-      .then(function(card) {
-        var level = card.get('level');
-        cardLevel = level;
-        if (level >= 50) {
-          throw new Error('card level must <= 50.');
-        }
-        return (
-          Account.where({id: accountId}).fetch()
-        );
-      }).then(function(account) {
-        var cry = account.get('cry');
-        var newCry = cry - (cardLevel * 10 + 25);
-        if (newCry < 0) {
-          throw new Error('cry is not enough.');
-        }
-        return Account.forge({id: accountId}).save({cry: newCry});
-      }).then(function(account) {
-        res.json(true);
-        return Card.forge({id: cardId}).save({level: cardLevel + 1});
-      }).catch(function(err) {
-        logger.info(err);
-        res.status(400).json({error: 'something wrong.'});
-      });
-  });
-
-  apiRouter.post('/account/cardParty/leave', isAuthenticated, function(req, res) {
-    var cardPartyId = req.body.cardPartyId;
-    var accountId = req.user.accountId;
-    if (!cardPartyId) {
-      res.status(400).json({error: 'wrong form.'});
-      return;
-    }
-    // TODO
-    // transation and move to model
-    CardParty.forge({id: cardPartyId})
-      .destroy()
-      .then(function() {
-        res.json(true);
-      }).catch(function(err) {
-        res.status(400).json({error: 'something wrong.'});
-      });
-  });
-
-  apiRouter.post('/account/cardParty/join', isAuthenticated, function(req, res) {
-    var cardId = req.body.cardId;
-    var slotIndex = req.body.slotIndex;
-    var cardPartyInfoId = req.body.cardPartyInfoId;
-    var accountId = req.user.accountId;
-    if (!cardId || !slotIndex || !cardPartyInfoId) {
-      res.status(400).json({error: 'wrong form.'});
-      return;
-    }
-    // TODO
-    // do more check and optimize!
-    Card
-      .query()
-      .where({id: cardId, account_id: accountId})
-      .count()
-      .then(function(column) {
-        var count = column[0].count;
-        if (count <= 0) {
-          throw new Error('not found card.');
-        }
-        return count;
-      }).then(function() {
-        return (
-          CardParty
-            .where({card_id: cardId,
-                    card_party_info_id: cardPartyInfoId})
-            .fetch()
-        );
-      }).then(function(cardParty) {
-        if (cardParty === null) {
-          return (
-            CardParty.forge(
-              {card_party_info_id: cardPartyInfoId,
-               slot_index: slotIndex,
-               card_id: cardId})
-              .save()
-          );
-        } else {
-          return (
-            CardParty
-              .forge({id: cardParty.get('id')})
-              .save({slot_index: slotIndex})
-          );
-        }
-      }).then(function(cardParty) {
-        res.json(cardParty.get('id'));
-      }).catch(function(err) {
-        res.status(400).json({error: 'something wrong.'});
-      });
-  });
-
-  apiRouter.post('/account/login', passport.authenticate('local'), function(req, res) {
-    res.json(req.user.get('id'));
-  });
-
-  apiRouter.post('/account/logout', isAuthenticated, function(req, res) {
-    req.logout();
-    req.session.destroy();
-    res.json(true);
-  });
-
-  var _attributeTypes = ['hp', 'spd', 'atk', 'def'];
-  var _effortTypes = ['hp_effort', 'spd_effort', 'atk_effort', 'def_effort'];
-
-  apiRouter.post('/account/card/effortUpdate', isAuthenticated, function(req, res) {
-    var accountId = req.user.accountId;
-    if (!accountId) {
-      res.status(401).json({error: 'need login.'});
-      return;
-    }
-    var cardId = req.body.id;
-    var cardEffortUpdates = req.body.cardEffortUpdates;
-    if (!cardId || !cardEffortUpdates) {
-      res.status(400).json({error: 'wrong form.'});
-      return;
-    }
-    var checkEffort = _.every(cardEffortUpdates, function(v, k) {
-      return _effortTypes.indexOf(k) != -1 && v > 0;
-    });
-    if (!checkEffort) {
-      res.status(400).json({error: 'wrong form.'});
-      return;
-    }
-    // TODO
-    // transation and move to model
-    Card
-      .where({id: cardId})
-      .fetch()
-      .then(function(card) {
-        var level = card.get('level');
-        var sumEffort = 0;
-        _effortTypes.forEach(function(t) {
-          sumEffort += card.get(t);
-        });
-        _.forEach(cardEffortUpdates, function(effortIncValue, effortType) {
-          sumEffort += effortIncValue;
-        });
-        if (level - sumEffort < 0) {
-          throw new Error('not enough effort for update');
-        }
-        var final = _.reduce(cardEffortUpdates, function(result, v, k) {
-          result[k] = v + card.get(k);
-          return result;
-        }, {});
-        res.json(true);
-        Card.forge({id: cardId}).save(final);
-      }).catch(function(err) {
-        logger.info(err);
-        res.status(400).json({error: 'something wrong.'});
-      });
-  });
-
-  app.use('/api', apiRouter);
+  require('./app/routes').addToExpress(app);
 
   function handleAuthed(accountId, socket) {
     redisClient
@@ -693,7 +123,7 @@ function createApp(options) {
             logger.info({accountId: accountId, finalMessage: finalMsg}, 'chat');
           };
           if (username === null) {
-            Account
+            models.Account
               .query()
               .where({id: accountId})
               .select('username')
@@ -757,7 +187,7 @@ function createApp(options) {
               bcpi.cardParty = cardParty;
               return bcpi;
             }
-            Account
+            models.Account
               .where('id', accountId)
               .fetch({
                 withRelated: ['cardPartyInfo', 'cardPartyInfo.cardParty',
@@ -771,7 +201,7 @@ function createApp(options) {
                 };
                 var cardPartyInfo = account.related('cardPartyInfo').toJSON();
                 var accountBattleCardPartyInfo = toAccountBattleCardPartyInfo(cardPartyInfo[0]);
-                var npcBattleCardPartyInfo = npcs.get(payload.npcId).get('battleCardPartyInfo').toJSON();
+                var npcBattleCardPartyInfo = models.NPCs.get(payload.npcId).get('battleCardPartyInfo').toJSON();
                 battlePC2NPC1v1.accountBattleCardPartyInfo = accountBattleCardPartyInfo;
                 battlePC2NPC1v1.npcBattleCardPartyInfo = npcBattleCardPartyInfo;
                 socket.emit('battle',
@@ -914,7 +344,7 @@ function createApp(options) {
           return;
         }
         handleAuthed(accountId, socket);
-        Account
+        models.Account
           .query()
           .where({id: accountId})
           .select('username')
