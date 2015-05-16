@@ -5,7 +5,7 @@ var RedisStore = require('connect-redis')(session);
 
 var sessionConfig = {
   develop: {
-    secret: 'yourSecretKey',
+    secret: 'YourSecretKey',
     store: {client: 'redis'},
     resave: false,
     saveUninitialized: false
