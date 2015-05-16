@@ -132,7 +132,7 @@ var Account = bookshelf.Model.extend({
       return (
         Card
           .where({id: cardId, account_id: accountId})
-          .fetch({withRelated: ['baseCard'], transacting: t})
+          .fetch({withRelated: ['baseCard'], transacting: t, require: true})
           .then(function(card) {
             getCry = _cardCry[card.related('baseCard').get('rea')];
             return getCry;
@@ -149,7 +149,7 @@ var Account = bookshelf.Model.extend({
             return (
               CardParty
                 .where('card_id', cardId)
-                .fetch({transacting: t})
+                .fetch({transacting: t, require: true})
             );
           }).then(function(cardParty) {
             if (cardParty !== null) {
