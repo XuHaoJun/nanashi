@@ -25,7 +25,7 @@ if (configs.oauth2.facebook) {
       .then(function(account) {
         done(null, account);
       }).catch(models.Account.NotFoundError, function() {
-        var form = {username: 'facebook-' + profile.id,
+        var form = {username: 'facebook:' + profile.id,
                     password: profile.id,
                     email: profile.emails[0].value,
                     account_provider_name: 'facebook'};
