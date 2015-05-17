@@ -49,6 +49,7 @@ exports.drawCard = function(req, res) {
       );
     }).then(function(card) {
       res.json(card.toJSON());
+      logger.info({accountId: accountId, req_id: req.id}, 'drawCard');
     }).catch(function(err) {
       res.status(400).json({error: 'account draw card fail.'});
     });
@@ -62,6 +63,7 @@ exports.register = function(req, res) {
       req.session.passport = {user: id};
       req.session.save();
       res.json(id);
+      logger.info({accountId: id, req_id: req.id, form: req.body}, 'register');
     }).catch(function(err) {
       res.status(400).json({error: 'account register fail.'});
     });
@@ -89,6 +91,7 @@ exports.cardDecompose = function(req, res) {
     .decomposeCard({accountId: accountId, cardId: cardId})
     .then(function(getCry) {
       res.json(getCry);
+      logger.info({accountId: accountId, req_id: req.id}, 'cardDecompose');
     }).catch(logger.info);
 };
 
@@ -200,10 +203,12 @@ exports.cardPartyJoin = function(req, res) {
 };
 
 exports.login = function(req, res) {
+  logger.info({accountId: req.user.get('id'), req_id: req.id}, 'login');
   res.json(req.user.get('id'));
 };
 
 exports.logout = function(req, res) {
+  logger.info({accountId: req.user.get('id'), req_id: req.id}, 'logout');
   req.logout();
   req.session.destroy();
   res.json(true);
@@ -257,4 +262,4 @@ exports.cardEffortUpdate = function(req, res) {
       logger.info(err);
       res.status(400).json({error: 'something wrong.'});
     });
-}
+};

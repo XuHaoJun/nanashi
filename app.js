@@ -70,14 +70,41 @@ function createApp(options) {
 
   app.use(require('express-request-id')());
 
+
+  function MongodbRawStream() {
+    var MongoClient = Promise.promisifyAll(require("mongodb"));
+    MongoClient
+      .connectAsync(require('./config/mongodb').url)
+      .then(function(db) {
+        this.db = db;
+        this.collection = db.collection('httpLog');
+      }.bind(this)).catch(console.log);
+  }
+
+  MongodbRawStream.prototype.write = function (rec) {
+    // TODO
+    // put rec to buffer until mongodb stream open and pull recs.
+    if (this.collection) {
+      this.collection.insert(rec);
+    }
+  };
+
   app.use(require('express-bunyan-logger')({
+    name: configs.server.appName,
     genReqId: function(req) {
       return req.id;
     },
-    name: configs.server.appName
-  }));
-  app.use(require('express-bunyan-logger').errorLogger({
-    name: configs.server.appName
+    streams: [
+      {
+        level: 'info',
+        stream: new MongodbRawStream(),
+        type: 'raw'
+      },
+      {
+        level: 'info',
+        stream: process.stdout
+      },
+    ]
   }));
 
   var session;
@@ -110,7 +137,7 @@ function createApp(options) {
         }
       });
     socket.join('onlineAccounts');
-    logger.info({accountId: accountId}, 'socket.io loign');
+    logger.info({accountId: accountId}, 'socket.io:loign');
     socket.on('chat', function(msg) {
       redisClient
         .hgetAsync('onlineAccountUsernames', accountId)
@@ -299,16 +326,19 @@ function createApp(options) {
               }
             }
             battle.num_round += 1;
+            var newMergedCardParty = _.take(accountCardParty, 3)
+                  .concat(_.take(npcCardParty, 3));
+            newMergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
+            battle.mergedCardParty = newMergedCardParty;
+            socket.emit('battle', {
+              action: 'handleEffectsQueue',
+              battleType: 'battlePC2NPC1v1',
+              effectsQueue: effectsQueue
+            });
             var packedBattle = msgpack.encode(battle);
             redisClient
               .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle)
-              .then(function() {
-                socket.emit('battle', {
-                  action: 'handleEffectsQueue',
-                  battleType: 'battlePC2NPC1v1',
-                  effectsQueue: effectsQueue
-                });
-              }).catch(console.log);
+              .catch(console.log);
           });
         break;
       default:
@@ -328,12 +358,12 @@ function createApp(options) {
     socket.on('disconnect', function() {
       if (is.existy(accountId)) {
         logger.info({accountId: accountId}, 'socket.io:disconected');
+        redisClient
+          .multi()
+          .setbit('onlineAccountIds', accountId, 0)
+          .hdel('onlineAccountUsernames', accountId)
+          .exec();
       }
-      redisClient
-        .multi()
-        .setbit('onlineAccountIds', accountId, 0)
-        .hdel('onlineAccountUsernames', accountId)
-        .exec();
     });
     rscript.runAsync('checkAndSet', ['onlineAccountIds'], [accountId])
       .then(function(result) {
@@ -364,9 +394,9 @@ function createApp(options) {
                  redisClient.delAsync('onlineAccountIds')])
       .then(function() {
         redisClient.quit(function(err, result) {
-          logger.info('redis client quit');
+          logger.info('redis:quit');
           knex.destroy(function() {
-            logger.info('knex destroy');
+            logger.info('knex:quit');
           });
         });
       });

@@ -99,6 +99,7 @@ var Account = bookshelf.Model.extend({
   }
 }, {
   register: Promise.method(function(form) {
+    form.email = form.email ? form.email.toLowerCase() : '';
     return (
       bookshelf.transaction(function(t) {
         return (
