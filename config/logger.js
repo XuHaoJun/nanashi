@@ -3,19 +3,28 @@ var Promise = require("bluebird");
 var MongoClient = Promise.promisifyAll(require("mongodb"));
 
 function MongodbRawStream() {
+  this.buffer = [];
+  this.db = null;
+  this.collection = null;
   MongoClient
     .connectAsync(require('./mongodb').url)
     .then(function(db) {
       this.db = db;
       this.collection = db.collection('gameLog');
+      var length = this.buffer.length;
+      if (length > 0) {
+        for (var i =0; i<length; i++) {
+          this.collection.insert(this.buffer.pop());
+        }
+      }
     }.bind(this)).catch(console.log);
 }
 
 MongodbRawStream.prototype.write = function (rec) {
-  // TODO
-  // put rec to buffer until mongodb stream open and pull recs.
   if (this.collection) {
     this.collection.insert(rec);
+  } else {
+    this.buffer.push(rec);
   }
 };
 

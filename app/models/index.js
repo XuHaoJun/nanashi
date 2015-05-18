@@ -183,6 +183,17 @@ var Account = bookshelf.Model.extend({
     var query = {id: accountId};
     return this.where(query)
       .fetch({require: true, withRelated: AccountAllRelation});
+  }),
+  getUsername: Promise.method(function(accountId) {
+    return (
+      this
+        .query()
+        .where({id: accountId})
+        .select('username')
+        .then(function(column) {
+          return column[0].username;
+        })
+    );
   })
 });
 

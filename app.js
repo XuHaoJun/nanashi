@@ -55,11 +55,16 @@ function createApp(options) {
 
   // TODO
   // should check online node clusters
-  redisClient
-    .multi()
-    .del('onlineAccountUsernames')
-    .del('onlineAccountIds')
-    .exec();
+  redisClient.incrAsync('numProcess')
+    .then(function(numProcess) {
+      if (numProcess == 1) {
+        redisClient
+          .multi()
+          .del('onlineAccountUsernames')
+          .del('onlineAccountIds')
+          .exec();
+      }
+    });
 
   app.set('port', configs.server.port);
 
@@ -151,17 +156,12 @@ function createApp(options) {
           };
           if (username === null) {
             models.Account
-              .query()
-              .where({id: accountId})
-              .select('username')
-              .then(function(data) {
-                var username = data[0].username;
+              .getUsername(accountId)
+              .then(function(username) {
                 redisClient.hset('onlineAccountUsernames', accountId, username);
                 sendMessage(username);
               })
-              .catch(function(err) {
-                logger.info(err);
-              });
+              .catch(logger.info);
           } else {
             sendMessage(username);
           }
@@ -186,7 +186,8 @@ function createApp(options) {
             }
             function toAccountBattleCardPartyInfo(cardPartyInfo) {
               var bcpi = {
-                name: cardPartyInfo.name
+                name: cardPartyInfo.name,
+                diedCards: []
               };
               var cardParty = _.sortBy(cardPartyInfo.cardParty, function(cp) {
                 return cp.slot_index;
@@ -337,8 +338,7 @@ function createApp(options) {
             });
             var packedBattle = msgpack.encode(battle);
             redisClient
-              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle)
-              .catch(console.log);
+              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle);
           });
         break;
       default:
@@ -375,30 +375,39 @@ function createApp(options) {
         }
         handleAuthed(accountId, socket);
         models.Account
-          .query()
-          .where({id: accountId})
-          .select('username')
-          .then(function(column) {
-            var username = column[0].username;
+          .getUsername(accountId)
+          .then(function(username) {
             return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
-          }).catch(console.log);
+          }).catch(logger.info);
       }).catch(function(err) {
         console.log(err);
       });
   });
 
+  function quit() {
+    redisClient.quit(function(err, result) {
+      logger.info('redis:quit');
+      knex.destroy(function() {
+        logger.info('knex:quit');
+      });
+    });
+  }
+
   function handleShutdown() {
-    // TODO
-    // not delete online data more one time.
-    Promise.all([redisClient.delAsync('onlineAccountUsernames'),
-                 redisClient.delAsync('onlineAccountIds')])
-      .then(function() {
-        redisClient.quit(function(err, result) {
-          logger.info('redis:quit');
-          knex.destroy(function() {
-            logger.info('knex:quit');
+    redisClient
+      .incrbyAsync('numProcess', -1)
+      .then(function(numProcess) {
+        if (numProcess !== 0) {
+          quit();
+          return;
+        }
+        redisClient
+          .multi()
+          .del('onlineAccountUsernames')
+          .del('onlineAccountIds')
+          .exec(function() {
+            quit();
           });
-        });
       });
   }
   process.on('SIGINT', handleShutdown);
