@@ -18,7 +18,7 @@ function createApp(options) {
   var models = require('./app/models');
   var knex = models.knex;
   var bookshelf = models.bookshelf;
-  var redis = require('ioredis');
+  var Redis = require('ioredis');
   var node_redis = require("redis");
 
   var app = express();
@@ -38,9 +38,7 @@ function createApp(options) {
                                        subClientOptions)
   }));
 
-  var redisClient = redis.createClient(configs.redis.getPort(),
-                                       configs.redis.getHostname(),
-                                       configs.redis.getOptions().toJSON());
+  var redisClient = new Redis(configs.redis.getURL());
   redisClient =  Promise.promisifyAll(redisClient);
 
   redisClient.on('error', logger.info);
@@ -173,7 +171,7 @@ function createApp(options) {
         // check payload's form
         logger.info({accountId: accountId, payload: payload}, 'battle:requestNPC');
         redisClient
-          .hget(new Buffer('account:battlePC2NPC1v1'), accountId, function(err, battle) {
+          .hgetBuffer('account:battlePC2NPC1v1', accountId, function(err, battle) {
             var found = (battle !== null);
             if (found) {
               battle = msgpack.decode(battle);
@@ -251,7 +249,7 @@ function createApp(options) {
       case 'useSkillsByPC':
         logger.info({accountId: accountId, payload: payload}, 'battle:userSkillsByPC');
         redisClient
-          .hgetAsync(new Buffer('account:'+payload.battleType), accountId)
+          .hgetBufferAsync(new Buffer('account:'+payload.battleType), accountId)
           .then(function(battle) {
             var found = (battle !== null);
             if (!found) {

@@ -20,6 +20,7 @@ if (_redisURLs.heroku) {
 
 var redisConfig = {
   develop: {
+    url: 'redis://localhost:6379',
     port: 6379,
     hostanme: 'localhost',
     options: {
@@ -27,10 +28,13 @@ var redisConfig = {
     }
   },
   production: {
+    url: _redisURLs.heroku,
     port: (_redisURL ? _redisURL.port : 6379),
     hostname: (_redisURL ? _redisURL.hostname : 'localhost'),
     options: {
+      auth: auth_pass,
       auth_pass: auth_pass,
+      enableReadyCheck: false,
       detect_buffers: true,
       no_ready_check: true
     }
@@ -47,6 +51,9 @@ _config = Immutable.fromJS(_config);
 module.exports = {
   get: function() {
     return _config;
+  },
+  getURL: function() {
+    return _config.get('url');
   },
   getClient: function() {
     return _config.get('client');
