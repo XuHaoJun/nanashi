@@ -5,6 +5,8 @@ function createApp(options) {
   var BufferList = require('bl');
   var configs = require('./config');
   var Promise  = require('bluebird');
+  var fs = require("fs");
+  Promise.promisifyAll(fs);
   var _ = require('lodash');
   var is = require('is_js');
   var compress = require('compression');
@@ -12,17 +14,11 @@ function createApp(options) {
   var expressSession = require('express-session');
   var RedisStore = require('connect-redis')(expressSession);
   var bodyParser = require('body-parser');
-  var Scripto = require('redis-scripto');
   var msgpack = require('msgpack5')();
   var models = require('./app/models');
   var knex = models.knex;
   var bookshelf = models.bookshelf;
-  var redis;
-  if (configs.redis.getClient() == 'ioredis') {
-    redis = require("ioredis");
-  } else {
-    redis = require("redis");
-  }
+  var redis = require('ioredis');
   var node_redis = require("redis");
 
   var app = express();
@@ -49,9 +45,13 @@ function createApp(options) {
 
   redisClient.on('error', logger.info);
 
-  var rscript = new Scripto(redisClient);
-  rscript = Promise.promisifyAll(rscript);
-  rscript.loadFromDir(__dirname+'/redis-scripts');
+  fs.readFileAsync(__dirname+'/redis-scripts/checkAndSet.lua', 'utf8')
+    .then(function(script) {
+      redisClient.defineCommand('checkAndSet', {
+        numberOfKeys: 1,
+        lua: script.toString('utf8')
+      });
+    }).catch(logger.info);
 
   // TODO
   // should check online node clusters
@@ -275,16 +275,28 @@ function createApp(options) {
             var diedCard;
             for (i = 0; i<length; i++) {
               card = mergedCardParty[i];
-              if (card.round_player === 'NPC') {
-                target = _.sample(_.take(accountCardParty, 3));
+              if (card.round_player === 'NPC' && card.hp > 0) {
+                targetCardParty = accountCardParty;
+                target = _.sample(_.take(targetCardParty, 3));
                 target.hp -= 1;
                 skillId = 1;
                 if (target.hp === 0) {
-                  accountCardParty.splice(target.round_card_slot_index, 1);
+                  targetCardParty.splice(target.round_card_slot_index, 1);
                   battle.diedCards.push(target);
                   targetCardParty.forEach(function(card, index) {
                     card.round_card_slot_index = index;
                   });
+                  if (targetCardParty.length === 0) {
+                    socket.emit('battle', {
+                      action: 'handleComplete',
+                      battleType: 'battlePC2NPC1v1',
+                      complete: {
+                        winer: 'NPC',
+                        loser: 'PC'
+                      }
+                    });
+                    return;
+                  }
                 }
                 effect = {
                   skillId:skillId,
@@ -305,24 +317,12 @@ function createApp(options) {
                   ]
                 };
                 effectsQueue.push(effect);
-              } else if(card.round_player === 'PC') {
+              } else if(card.round_player === 'PC' && card.hp > 0) {
                 useSkill = _.find(useSkills, function(us) {
                   return us.round_card_slot_index == card.round_card_slot_index;
                 });
                 skillId = useSkill.skillId;
                 targetCardParty = (useSkill.target.round_player === 'NPC' ? npcCardParty : accountCardParty);
-                // check win
-                if (targetCardParty.length === 0) {
-                  socket.emit('battle', {
-                    action: 'handleComplete',
-                    battleType: 'battlePC2NPC1v1',
-                    complete: {
-                      winer: 'PC',
-                      loser: 'NPC'
-                    }
-                  });
-                  return;
-                }
                 target = targetCardParty[useSkill.target.round_card_slot_index];
                 if (!target) {
                   target = targetCardParty[0];
@@ -335,6 +335,18 @@ function createApp(options) {
                   targetCardParty.forEach(function(card, index) {
                     card.round_card_slot_index = index;
                   });
+                  // check win
+                  if (targetCardParty.length === 0) {
+                    socket.emit('battle', {
+                      action: 'handleComplete',
+                      battleType: 'battlePC2NPC1v1',
+                      complete: {
+                        winer: 'PC',
+                        loser: 'NPC'
+                      }
+                    });
+                    return;
+                  }
                 }
                 effect = {
                   skillId:skillId,
@@ -403,7 +415,7 @@ function createApp(options) {
           .exec();
       }
     });
-    rscript.runAsync('checkAndSet', ['onlineAccountIds'], [accountId])
+    redisClient.checkAndSet('onlineAccountIds', accountId)
       .then(function(result) {
         var exists = (result === null);
         if (exists) {

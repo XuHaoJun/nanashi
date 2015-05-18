@@ -20,7 +20,6 @@ if (_redisURLs.heroku) {
 
 var redisConfig = {
   develop: {
-    client: 'redis',
     port: 6379,
     hostanme: 'localhost',
     options: {
@@ -28,7 +27,6 @@ var redisConfig = {
     }
   },
   production: {
-    client: 'redis',
     port: (_redisURL ? _redisURL.port : 6379),
     hostname: (_redisURL ? _redisURL.hostname : 'localhost'),
     options: {
