@@ -186,8 +186,7 @@ function createApp(options) {
             }
             function toAccountBattleCardPartyInfo(cardPartyInfo) {
               var bcpi = {
-                name: cardPartyInfo.name,
-                diedCards: []
+                name: cardPartyInfo.name
               };
               var cardParty = _.sortBy(cardPartyInfo.cardParty, function(cp) {
                 return cp.slot_index;
@@ -225,7 +224,8 @@ function createApp(options) {
                 var battlePC2NPC1v1 = {
                   num_round: 0,
                   npc_id: payload.npcId,
-                  account_id: accountId
+                  account_id: accountId,
+                  diedCards: []
                 };
                 var cardPartyInfo = account.related('cardPartyInfo').toJSON();
                 var accountBattleCardPartyInfo = toAccountBattleCardPartyInfo(cardPartyInfo[0]);
@@ -272,12 +272,20 @@ function createApp(options) {
             var effect;
             var card;
             var skillId;
+            var diedCard;
             for (i = 0; i<length; i++) {
               card = mergedCardParty[i];
               if (card.round_player === 'NPC') {
                 target = _.sample(_.take(accountCardParty, 3));
                 target.hp -= 1;
                 skillId = 1;
+                if (target.hp === 0) {
+                  accountCardParty.splice(target.round_card_slot_index, 1);
+                  battle.diedCards.push(target);
+                  targetCardParty.forEach(function(card, index) {
+                    card.round_card_slot_index = index;
+                  });
+                }
                 effect = {
                   skillId:skillId,
                   user: {
@@ -303,8 +311,31 @@ function createApp(options) {
                 });
                 skillId = useSkill.skillId;
                 targetCardParty = (useSkill.target.round_player === 'NPC' ? npcCardParty : accountCardParty);
+                // check win
+                if (targetCardParty.length === 0) {
+                  socket.emit('battle', {
+                    action: 'handleComplete',
+                    battleType: 'battlePC2NPC1v1',
+                    complete: {
+                      winer: 'PC',
+                      loser: 'NPC'
+                    }
+                  });
+                  return;
+                }
                 target = targetCardParty[useSkill.target.round_card_slot_index];
+                if (!target) {
+                  target = targetCardParty[0];
+                }
                 target.hp -= 1;
+                if (target.hp === 0) {
+                  targetCardParty.splice(target.round_card_slot_index, 1);
+                  target.round_card_slot_index = -1;
+                  battle.diedCards.push(target);
+                  targetCardParty.forEach(function(card, index) {
+                    card.round_card_slot_index = index;
+                  });
+                }
                 effect = {
                   skillId:skillId,
                   user: {
@@ -331,14 +362,16 @@ function createApp(options) {
                   .concat(_.take(npcCardParty, 3));
             newMergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
             battle.mergedCardParty = newMergedCardParty;
-            socket.emit('battle', {
-              action: 'handleEffectsQueue',
-              battleType: 'battlePC2NPC1v1',
-              effectsQueue: effectsQueue
-            });
             var packedBattle = msgpack.encode(battle);
             redisClient
-              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle);
+              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle)
+              .then(function() {
+                socket.emit('battle', {
+                  action: 'handleEffectsQueue',
+                  battleType: 'battlePC2NPC1v1',
+                  effectsQueue: effectsQueue
+                });
+              });
           });
         break;
       default:
@@ -350,8 +383,13 @@ function createApp(options) {
   }
 
   io.on('connection', function(socket){
-    var accountId = socket.request.session.passport.user;
-    if (!is.existy(accountId)) {
+    if (socket.request.session.passport) {
+      var accountId = socket.request.session.passport.user;
+      if (!is.existy(accountId)) {
+        socket.disconnect();
+        return;
+      }
+    } else {
       socket.disconnect();
       return;
     }
