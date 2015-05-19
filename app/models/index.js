@@ -75,7 +75,11 @@ var AccountCreatingRules = {
     return knex('account').where('email', '=', val).then(function(resp) {
       if (resp.length > 0) throw new Error('The email address is already in use.');
     });
-  }]
+  }],
+  account_provider_name: {
+    rule: 'contains',
+    params: ['local', 'facebook']
+  }
 };
 
 var AccountAllRelation = ['deck',
