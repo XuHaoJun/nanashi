@@ -65,12 +65,12 @@ var CardPartyInfo = bookshelf.Model.extend({
 });
 
 var AccountCreatingRules = {
-  username: ['required', 'minLength:4', 'maxLength:24', function(val) {
+  username: ['required', 'minLength:4', 'maxLength:64', function(val) {
     return knex('account').where('username', '=', val).then(function(resp) {
       if (resp.length > 0) throw new Error('The username is already in use.');
     });
   }],
-  password: ['required', 'minLength:4', 'maxLength:24'],
+  password: ['required', 'minLength:4', 'maxLength:64'],
   email: ['required', 'email', function(val) {
     return knex('account').where('email', '=', val).then(function(resp) {
       if (resp.length > 0) throw new Error('The email address is already in use.');
