@@ -39,7 +39,6 @@ function createApp(options) {
   }));
 
   var redisClient = new Redis(configs.redis.getURL());
-  redisClient =  Promise.promisifyAll(redisClient);
 
   redisClient.on('error', logger.info);
 
@@ -53,7 +52,7 @@ function createApp(options) {
 
   // TODO
   // should check online node clusters
-  redisClient.incrAsync('numProcess')
+  redisClient.incr('numProcess')
     .then(function(numProcess) {
       if (numProcess == 1) {
         redisClient
@@ -133,7 +132,7 @@ function createApp(options) {
 
   function handleAuthed(accountId, socket) {
     redisClient
-      .lrangeAsync('chatMessages', 0, -1)
+      .lrange('chatMessages', 0, -1)
       .then(function(messages) {
         if (messages.length > 0) {
           socket.emit('chat', messages.reverse());
@@ -143,7 +142,7 @@ function createApp(options) {
     logger.info({accountId: accountId}, 'socket.io:loign');
     socket.on('chat', function(msg) {
       redisClient
-        .hgetAsync('onlineAccountUsernames', accountId)
+        .hget('onlineAccountUsernames', accountId)
         .then(function(username) {
           var sendMessage = function(username) {
             var finalMsg = username + ': ' + msg;
@@ -249,7 +248,7 @@ function createApp(options) {
       case 'useSkillsByPC':
         logger.info({accountId: accountId, payload: payload}, 'battle:userSkillsByPC');
         redisClient
-          .hgetBufferAsync(new Buffer('account:'+payload.battleType), accountId)
+          .hgetBuffer('account:'+payload.battleType, accountId)
           .then(function(battle) {
             var found = (battle !== null);
             if (!found) {
@@ -264,7 +263,7 @@ function createApp(options) {
             var useSkill;
             var mergedCardParty = battle.mergedCardParty;
             var length = mergedCardParty.length;
-            var i;
+            var i, j;
             var effectsQueue = [];
             var target;
             var effect;
@@ -281,9 +280,9 @@ function createApp(options) {
                 if (target.hp === 0) {
                   targetCardParty.splice(target.round_card_slot_index, 1);
                   battle.diedCards.push(target);
-                  targetCardParty.forEach(function(card, index) {
-                    card.round_card_slot_index = index;
-                  });
+                  for (j=0; j<targetCardParty.length; j++) {
+                    targetCardParty[j].round_card_slot_index = j;
+                  }
                   if (targetCardParty.length === 0) {
                     socket.emit('battle', {
                       action: 'handleComplete',
@@ -330,9 +329,9 @@ function createApp(options) {
                   targetCardParty.splice(target.round_card_slot_index, 1);
                   target.round_card_slot_index = -1;
                   battle.diedCards.push(target);
-                  targetCardParty.forEach(function(card, index) {
-                    card.round_card_slot_index = index;
-                  });
+                  for (j=0; j<targetCardParty.length; j++) {
+                    targetCardParty[j].round_card_slot_index = j;
+                  }
                   // check win
                   if (targetCardParty.length === 0) {
                     socket.emit('battle', {
@@ -374,7 +373,7 @@ function createApp(options) {
             battle.mergedCardParty = newMergedCardParty;
             var packedBattle = msgpack.encode(battle);
             redisClient
-              .hsetAsync('account:battlePC2NPC1v1', accountId, packedBattle)
+              .hset('account:battlePC2NPC1v1', accountId, packedBattle)
               .then(function() {
                 socket.emit('battle', {
                   action: 'handleEffectsQueue',
@@ -425,7 +424,7 @@ function createApp(options) {
         models.Account
           .getUsername(accountId)
           .then(function(username) {
-            return redisClient.hsetAsync('onlineAccountUsernames', accountId, username);
+            return redisClient.hset('onlineAccountUsernames', accountId, username);
           }).catch(logger.info);
       }).catch(function(err) {
         console.log(err);
@@ -443,7 +442,7 @@ function createApp(options) {
 
   function handleShutdown() {
     redisClient
-      .incrbyAsync('numProcess', -1)
+      .incrby('numProcess', -1)
       .then(function(numProcess) {
         if (numProcess !== 0) {
           quit();
