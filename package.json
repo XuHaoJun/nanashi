@@ -30,7 +30,7 @@
         "killable": "^1.0.0",
         "knex": "^0.8.5",
         "lodash": "^3.8.0",
-        "mongodb": "^2.0.31",
+        "mongodb": "^2.0.32",
         "morgan": "^1.5.3",
         "msgpack5": "^2.2.0",
         "passport": "^0.2.1",

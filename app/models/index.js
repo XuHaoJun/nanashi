@@ -6,6 +6,10 @@ var configs = require('../../config');
 var knex = require('knex')(configs.db);
 var bookshelf = require('bookshelf')(knex);
 
+var Redis = require('ioredis');
+var redisClient = new Redis(configs.redis.getURL());
+redisClient.on('error', configs.logger.info);
+
 var BaseCard = bookshelf.Model.extend({
   tableName: 'base_card',
   cards: function() {
@@ -209,6 +213,7 @@ var BattlePC2NPC1v1 = bookshelf.Model.extend({
 
 var npcs = {
   1: {
+    npcId: 1,
     name: '神奇喵喵',
     battleCardPartyInfo:
     {
@@ -243,5 +248,6 @@ module.exports = {
   CardParty: CardParty,
   CardPartyInfo: CardPartyInfo,
   BattlePC2NPC1v1: BattlePC2NPC1v1,
+  redisClient: redisClient,
   NPCs: npcs
 };

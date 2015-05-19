@@ -67,5 +67,6 @@ function isAuthenticated(req, res, next) {
 module.exports = {
   passport: passport,
   account: require('./account'),
+  chat: require('./chat'),
   isAuthenticated: isAuthenticated
 };
