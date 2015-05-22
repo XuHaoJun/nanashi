@@ -68,5 +68,6 @@ module.exports = {
   passport: passport,
   account: require('./account'),
   chat: require('./chat'),
+  battle: require('./battle'),
   isAuthenticated: isAuthenticated
 };
