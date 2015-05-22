@@ -17,6 +17,14 @@ exports.addToExpress = function(app) {
     });
   }
 
+  if (configs.oauth2.google) {
+    app.get('/auth/google', passport.authenticate('google', { scope: 'https://www.googleapis.com/auth/plus.login' }));
+
+    app.get('/auth/google/callback', passport.authenticate('google'), function(req, res) {
+      res.redirect('/');
+    });
+  }
+
   var apiRouter = express.Router();
 
   apiRouter.get('/account', isAuthenticated, controllers.account.get);

@@ -1,6 +1,5 @@
 var passport = require('passport');
 var LocalStrategy = require('passport-local').Strategy;
-var FacebookStrategy = require('passport-facebook').Strategy;
 var models = require('../models');
 var configs = require('../../config');
 var logger = configs.logger;
@@ -18,27 +17,41 @@ passport.use(new LocalStrategy(
   }
 ));
 
+function handlePassportOauth2(providerName, profileId, email, done) {
+  models.Account
+    .loginByOauth(providerName, profileId)
+    .then(function(account) {
+      done(null, account);
+    }).catch(models.Account.NotFoundError, function() {
+      var form = {username: providerName + ':' + profileId,
+                  password: profileId,
+                  email: email,
+                  account_provider_name: providerName};
+      models.Account.register(form)
+        .then(function(account) {
+          done(null, account);
+        }).catch(function(err) {
+          done(err, null);
+        });
+    }).catch(function(err) {
+      done(err, null);
+    });
+}
+
 if (configs.oauth2.facebook) {
-  passport.use(new FacebookStrategy(configs.oauth2.facebook, function(accessToken, refreshToken, profile, done) {
-    models.Account
-      .loginByOauth('facebook', profile.id)
-      .then(function(account) {
-        done(null, account);
-      }).catch(models.Account.NotFoundError, function() {
-        var form = {username: 'facebook:' + profile.id,
-                    password: profile.id,
-                    email: profile.emails[0].value,
-                    account_provider_name: 'facebook'};
-        models.Account.register(form)
-          .then(function(account) {
-            done(null, account);
-          }).catch(function(err) {
-            done(err, null);
-          });
-      }).catch(function(err) {
-        done(err, null);
-      });
-  }));
+  var FacebookStrategy = require('passport-facebook').Strategy;
+  function handlePassportFacebook(accessToken, refreshToken, profile, done) {
+    handlePassportOauth2('facebook', profile.id, profile.emails[0].value, done);
+  }
+  passport.use(new FacebookStrategy(configs.oauth2.facebook, handlePassportFacebook));
+}
+
+if (configs.oauth2.google) {
+  var GoogleStrategy = require('passport-google-oauth').OAuth2Strategy;
+  function handlePassportGoogle(token, tokenSecret, profile, done) {
+    handlePassportOauth2('google', profile.id, profile.emails[0].value, done);
+  }
+  passport.use(new GoogleStrategy(configs.oauth2.google, handlePassportGoogle));
 }
 
 passport.serializeUser(function(user, done) {
