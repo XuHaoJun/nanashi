@@ -27,13 +27,17 @@ function handlePassportOauth2(providerName, profileId, email, done) {
                   password: profileId,
                   email: email,
                   account_provider_name: providerName};
+      logger.info(form, 'oauth2:register:ready');
       models.Account.register(form)
         .then(function(account) {
+          logger.info(account.toJSON(), 'oauth2:register:success');
           done(null, account);
         }).catch(function(err) {
+          logger.info(err, 'oauth2:register:failed');
           done(err, null);
         });
     }).catch(function(err) {
+      logger.info(err);
       done(err, null);
     });
 }
