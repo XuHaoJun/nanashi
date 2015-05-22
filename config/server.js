@@ -8,7 +8,7 @@ var serverConfig = {
       workers: 2
     },
     port: process.env.PORT || 3000,
-    staticDirectory: 'client/dist'
+    staticDirectory: '../nanashiClient/dist'
   },
   production: {
     appName: 'nanashi',
