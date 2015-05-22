@@ -78,7 +78,7 @@ var AccountCreatingRules = {
   }],
   account_provider_name: {
     rule: 'contains',
-    params: ['local', 'facebook']
+    params: ['local', 'facebook', 'google']
   }
 };
 
