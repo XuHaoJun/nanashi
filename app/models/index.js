@@ -1,3 +1,4 @@
+var _ = require('lodash');
 var Immutable = require('immutable');
 var Promise  = require('bluebird');
 var checkit = require('checkit');
@@ -76,10 +77,9 @@ var AccountCreatingRules = {
       if (resp.length > 0) throw new Error('The email address is already in use.');
     });
   }],
-  account_provider_name: {
-    rule: 'contains',
-    params: ['local', 'facebook', 'google']
-  }
+  account_provider_name: [function(val) {
+    return _.includes(['local', 'facebook', 'google'], val);
+  }]
 };
 
 var AccountAllRelation = ['deck',
