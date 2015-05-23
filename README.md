@@ -25,11 +25,15 @@ git clone https://github.com/XuHaoJun/nanashi.git
 cd nanashi
 # install library.
 npm install
+# import sql file to PostgreSQL.
+psql YOUR_DATABASE_NAME USER_NAME < ./sql-files/main.sql
 
 # download nanashi client at same directory.
-cd ..; git clone https://github.com/XuHaoJun/nanashiClient.git
+cd ..
+git clone https://github.com/XuHaoJun/nanashiClient.git
 # generate client
-cd nanashiClient; npm install && npm run build
+cd nanashiClient
+npm install && npm run build
 # download client assets(fonts, images, sounds.....).
 wget https://dl.dropboxusercontent.com/u/36276771/nanashiClient_assets.tar.xz
 tar xf nanashiClient_assets.tar.xz
