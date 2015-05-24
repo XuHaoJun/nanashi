@@ -47,8 +47,6 @@ function createApp(options) {
       });
     }).catch(logger.info);
 
-  // TODO
-  // should check online node clusters
   redisClient.incr('numProcess')
     .then(function(numProcess) {
       if (numProcess == 1) {
@@ -83,6 +81,25 @@ function createApp(options) {
     session(socket.request, socket.request.res, next);
   });
 
+  io.use(function(socket, next) {
+    require('express-request-id')({setHeader: false})(socket.request, socket.request.res, next);;
+  });
+
+  io.use(function(socket, next) {
+    var req = socket.request;
+    req.log = require('./config/socketIOLogger');
+    req.log.info(
+      {
+        'remote-address': socket.handshake.address,
+        method: req.method,
+        req_id: req.id,
+        url: req.url,
+        headers: req.headers
+      },
+      'socket.io:httpRequest');
+    next();
+  });
+
   app.set('trust proxy', 1);
 
   app.use(session);
@@ -93,13 +110,19 @@ function createApp(options) {
   require('./app/routes').addToExpress(app);
 
   function handleAuthed(io, socket, accountId) {
-    logger.info({accountId: accountId}, 'socket.io:loign');
+    logger.info({req_id: socket.request.id,
+                 accountId: accountId},
+                'socket.io:loign');
     controllers.chat.pullChatMessages(io, socket, accountId);
     socket.join('onlineAccounts');
-    socket.on('chat', controllers.chat.sendMessage.bind(this, io, socket, accountId));
-    socket.on('battle:requestNPC', controllers.battle.requestNPC.bind(this, io, socket, accountId));
-    socket.on('battle:requestPC', controllers.battle.requestPC.bind(this, io, socket, accountId));
-    socket.on('battle:useSkillsByPC', controllers.battle.useSkillsByPC.bind(this, io, socket, accountId));
+    socket.on('chat',
+              controllers.chat.sendMessage.bind(this, io, socket, accountId));
+    socket.on('battle:requestNPC',
+              controllers.battle.requestNPC.bind(this, io, socket, accountId));
+    socket.on('battle:requestPC',
+              controllers.battle.requestPC.bind(this, io, socket, accountId));
+    socket.on('battle:useSkillsByPC',
+              controllers.battle.useSkillsByPC.bind(this, io, socket, accountId));
   }
 
   io.on('connection', function(socket){
@@ -115,7 +138,8 @@ function createApp(options) {
     }
     socket.on('disconnect', function() {
       if (is.existy(accountId)) {
-        logger.info({accountId: accountId}, 'socket.io:disconected');
+        logger.info({req_id: socket.request.id,
+                     accountId: accountId}, 'socket.io:disconected');
         redisClient
           .multi()
           .setbit('onlineAccountIds', accountId, 0)

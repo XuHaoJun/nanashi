@@ -1,11 +1,9 @@
+var bunyan = require('bunyan');
+
 var MongodbLogRawStream = require('../lib/MongodbWriteRawStream');
 
-var _expressLogger = require('express-bunyan-logger')({
+var _logger = bunyan.createLogger({
   name: require('./server').appName,
-  format: "http",
-  genReqId: function(req) {
-    return req.id;
-  },
   streams: [
     {
       level: 'info',
@@ -19,4 +17,4 @@ var _expressLogger = require('express-bunyan-logger')({
   ]
 });
 
-module.exports = _expressLogger;
+module.exports = _logger;
