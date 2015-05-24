@@ -8,7 +8,6 @@ passport.use(new LocalStrategy(
   function(username, password, done) {
     models.Account.loginByLocal(username, password)
       .then(function(account) {
-        logger.info({accountId: account.get('id')}, 'login');
         done(null, account);
       }).catch(function(err) {
         logger.info(err);

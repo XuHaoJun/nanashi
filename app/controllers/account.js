@@ -203,8 +203,8 @@ exports.cardPartyJoin = function(req, res) {
 };
 
 exports.login = function(req, res) {
-  logger.info({accountId: req.user.accountId, req_id: req.id}, 'login');
-  res.json(req.user.accountId);
+  logger.info({accountId: req.user.get('id'), req_id: req.id}, 'login');
+  res.json(true);
 };
 
 exports.logout = function(req, res) {
