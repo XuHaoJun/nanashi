@@ -4,6 +4,37 @@ var models = require('../models');
 var redisClient = models.redisClient;
 var logger = require('../../config/logger');
 
+function toAccountBattleCardPartyInfo(cardPartyInfo) {
+  var bcpi = {
+    name: cardPartyInfo.name
+  };
+  var cardParty = _.sortBy(cardPartyInfo.cardParty, function(cp) {
+    return cp.slot_index;
+  });
+  for(var i = 0; i<cardParty.length; i++) {
+    var cp = cardParty[i];
+    cp.cardPartyInfoIndex = 0;
+    cp.round_card_slot_index = i;
+    cp.round_player = 'PC';
+    cp.max_hp = (cp.card.hp_effort * 3) + cp.card.baseCard.hp;
+    cp.hp = cp.max_hp;
+    cp.spd = (cp.card.spd_effort * 3) + cp.card.baseCard.spd;
+    cp.atk = (cp.card.atk_effort * 3) + cp.card.baseCard.atk;
+    cp.def = (cp.card.def_effort * 3) + cp.card.baseCard.def;
+    cp.base_card_id = cp.card.base_card_id;
+    cp.account_id = cp.card.account_id;
+    cp.level = cp.card.level;
+    cp.name = cp.card.baseCard.name;
+    cp.skill1 = cp.card.skill1;
+    cp.skill2 = cp.card.skill2;
+    cp.skill3 = cp.card.skill3;
+    cp.skill4 = cp.card.skill4;
+    delete cp.card;
+  }
+  bcpi.cardParty = cardParty;
+  return bcpi;
+}
+
 exports.requestNPC = function(io, socket, accountId, payload) {
   // check payload's form
   logger.info({accountId: accountId, payload: payload}, 'battle:requestNPC');
@@ -12,42 +43,13 @@ exports.requestNPC = function(io, socket, accountId, payload) {
       var found = (battle !== null);
       if (found) {
         battle = msgpack.decode(battle);
-        delete battle.mergedCardParty;
+        // TODO
+        // may be delete enemy info.
         socket.emit('battle',
                     {action: 'initialize',
                      battlePC2NPC1v1: battle
                     });
         return;
-      }
-      function toAccountBattleCardPartyInfo(cardPartyInfo) {
-        var bcpi = {
-          name: cardPartyInfo.name
-        };
-        var cardParty = _.sortBy(cardPartyInfo.cardParty, function(cp) {
-          return cp.slot_index;
-        });
-        for(var i = 0; i<cardParty.length; i++) {
-          var cp = cardParty[i];
-          cp.cardPartyInfoIndex = 0;
-          cp.round_card_slot_index = i;
-          cp.round_player = 'PC';
-          cp.max_hp = (cp.card.hp_effort * 3) + cp.card.baseCard.hp;
-          cp.hp = cp.max_hp;
-          cp.spd = (cp.card.spd_effort * 3) + cp.card.baseCard.spd;
-          cp.atk = (cp.card.atk_effort * 3) + cp.card.baseCard.atk;
-          cp.def = (cp.card.def_effort * 3) + cp.card.baseCard.def;
-          cp.base_card_id = cp.card.base_card_id;
-          cp.account_id = cp.card.account_id;
-          cp.level = cp.card.level;
-          cp.name = cp.card.baseCard.name;
-          cp.skill1 = cp.card.skill1;
-          cp.skill2 = cp.card.skill2;
-          cp.skill3 = cp.card.skill3;
-          cp.skill4 = cp.card.skill4;
-          delete cp.card;
-        }
-        bcpi.cardParty = cardParty;
-        return bcpi;
       }
       models.Account
         .where('id', accountId)
@@ -71,10 +73,6 @@ exports.requestNPC = function(io, socket, accountId, payload) {
                       {action: 'initialize',
                        battlePC2NPC1v1: battlePC2NPC1v1
                       });
-          var mergedCardParty = _.take(accountBattleCardPartyInfo.cardParty, 3)
-                .concat(_.take(npcBattleCardPartyInfo.cardParty, 3));
-          mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
-          battlePC2NPC1v1.mergedCardParty = mergedCardParty;
           var packedBattle = msgpack.encode(battlePC2NPC1v1);
           redisClient.hset('account:battlePC2NPC1v1', accountId, packedBattle);
         }).catch(console.log);
@@ -97,7 +95,8 @@ exports.useSkillsByPC = function(io, socket, accountId, payload) {
       var targetCardParty;
       var useSkills = payload.prepareUseSkills;
       var useSkill;
-      var mergedCardParty = battle.mergedCardParty;
+      var mergedCardParty = _.take(accountCardParty, 3).concat(_.take(npcCardParty, 3));
+      mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
       var length = mergedCardParty.length;
       var i, j;
       var effectsQueue = [];
@@ -220,10 +219,6 @@ exports.useSkillsByPC = function(io, socket, accountId, payload) {
         }
       }
       battle.num_round += 1;
-      var newMergedCardParty = _.take(accountCardParty, 3)
-            .concat(_.take(npcCardParty, 3));
-      newMergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
-      battle.mergedCardParty = newMergedCardParty;
       var packedBattle = msgpack.encode(battle);
       redisClient
         .hset('account:battlePC2NPC1v1', accountId, packedBattle)
@@ -235,4 +230,7 @@ exports.useSkillsByPC = function(io, socket, accountId, payload) {
           });
         });
     });
+};
+
+exports.requestPC = function(io, socket, accountId, payload) {
 };
