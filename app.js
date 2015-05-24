@@ -1,7 +1,7 @@
-var logger = require('./config/logger');
 
 function createApp(options) {
   options = options ? options : {};
+  var logger = require('./config/logger');
   var BufferList = require('bl');
   var configs = require('./config');
   var Promise  = require('bluebird');
@@ -69,42 +69,7 @@ function createApp(options) {
 
   app.use(require('express-request-id')());
 
-
-  function MongodbRawStream() {
-    var MongoClient = Promise.promisifyAll(require("mongodb"));
-    MongoClient
-      .connectAsync(require('./config/mongodb').url)
-      .then(function(db) {
-        this.db = db;
-        this.collection = db.collection('httpLog');
-      }.bind(this)).catch(console.log);
-  }
-
-  MongodbRawStream.prototype.write = function (rec) {
-    // TODO
-    // put rec to buffer until mongodb stream open and pull recs.
-    if (this.collection) {
-      this.collection.insert(rec);
-    }
-  };
-
-  app.use(require('express-bunyan-logger')({
-    name: configs.server.appName,
-    genReqId: function(req) {
-      return req.id;
-    },
-    streams: [
-      {
-        level: 'info',
-        stream: new MongodbRawStream(),
-        type: 'raw'
-      },
-      {
-        level: 'info',
-        stream: process.stdout
-      },
-    ]
-  }));
+  app.use(require('./config/expressLogger'));
 
   var session;
   if (configs.session.store.client == 'redis') {
@@ -133,6 +98,7 @@ function createApp(options) {
     socket.join('onlineAccounts');
     socket.on('chat', controllers.chat.sendMessage.bind(this, io, socket, accountId));
     socket.on('battle:requestNPC', controllers.battle.requestNPC.bind(this, io, socket, accountId));
+    socket.on('battle:requestPC', controllers.battle.requestPC.bind(this, io, socket, accountId));
     socket.on('battle:useSkillsByPC', controllers.battle.useSkillsByPC.bind(this, io, socket, accountId));
   }
 
@@ -208,6 +174,7 @@ function createApp(options) {
 var cluster = require('cluster');
 var config = require('./config').server;
 var killable = require('killable');
+var logger = require('./config/logger');
 
 function handleStartServer() {
   logger.info(config, 'server:start');
