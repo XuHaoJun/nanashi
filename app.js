@@ -1,5 +1,4 @@
-
-function createApp(options) {
+function createApp(_workerShutdownPromise, options) {
   options = options ? options : {};
   var logger = require('./config/logger');
   var BufferList = require('bl');
@@ -47,9 +46,9 @@ function createApp(options) {
       });
     }).catch(logger.info);
 
-  redisClient.incr('numProcess')
-    .then(function(numProcess) {
-      if (numProcess == 1) {
+  redisClient.incr('numWorkers')
+    .then(function(numWorkers) {
+      if (numWorkers == 1) {
         redisClient
           .multi()
           .del('onlineAccountUsernames')
@@ -100,7 +99,7 @@ function createApp(options) {
     next();
   });
 
-  app.set('trust proxy', 1);
+  app.enable('trust proxy');
 
   app.use(session);
 
@@ -164,21 +163,22 @@ function createApp(options) {
       }).catch(logger.info);
   });
 
-  function quit() {
+  function quit(resolve) {
     redisClient.quit(function(err, result) {
       logger.info('redis:quit');
       knex.destroy(function() {
         logger.info('knex:quit');
+        resolve();
       });
     });
   }
 
-  function handleShutdown() {
+  function shutdown(resolve) {
     redisClient
-      .incrby('numProcess', -1)
-      .then(function(numProcess) {
-        if (numProcess !== 0) {
-          quit();
+      .incrby('numWorkers', -1)
+      .then(function(numWorkers) {
+        if (numWorkers !== 0) {
+          quit(resolve);
           return;
         }
         redisClient
@@ -186,19 +186,28 @@ function createApp(options) {
           .del('onlineAccountUsernames')
           .del('onlineAccountIds')
           .exec(function() {
-            quit();
+            quit(resolve);
           });
       });
   }
-  process.on('SIGINT', handleShutdown);
-  process.on('SIGTERM', handleShutdown);
+
+  function shutdownPromise() {
+    return new Promise(function(resolve) {
+      process.on('SIGINT', shutdown.bind(this, resolve));
+      process.on('SIGTERM', shutdown.bind(this, resolve));
+    });
+  }
+
+  _workerShutdownPromise.push(shutdownPromise());
+
   return http;
 }
 
-var cluster = require('cluster');
 var config = require('./config').server;
 var killable = require('killable');
 var logger = require('./config/logger');
+var Promise  = require('bluebird');
+var _workerShutdownPromise = [];
 
 function handleStartServer() {
   logger.info(config, 'server:start');
@@ -206,17 +215,19 @@ function handleStartServer() {
 
 if (config.cluster.disable === false) {
   (function() {
+    var cluster = require('cluster');
     var workers = config.cluster.workers;
     var sticky = require('sticky-session');
-    var server = sticky(workers, createApp).listen(config.port, handleStartServer);
+    var createAppFunc = createApp.bind(this, _workerShutdownPromise);
+    var server = sticky(workers, createAppFunc).listen(config.port, handleStartServer);
     killable(server);
     function handleShutdown() {
       if (cluster.isMaster) {
         server.kill(function() {
           logger.info('server:shutdown');
-          setTimeout(function() {
+          Promise.all(_workerShutdownPromise, function() {
             process.exit(0);
-          }, 350);
+          });
         });
       }
     }
@@ -225,14 +236,14 @@ if (config.cluster.disable === false) {
   }());
 } else {
   (function() {
-    var server = createApp().listen(config.port, handleStartServer);
+    var server = createApp(_workerShutdownPromise).listen(config.port, handleStartServer);
     killable(server);
     function handleShutdown() {
       server.kill(function() {
         logger.info('server:shutdown');
-        setTimeout(function() {
+        Promise.all(_workerShutdownPromise, function() {
           process.exit(0);
-        }, 350);
+        });
       });
     }
     process.on('SIGINT', handleShutdown);
