@@ -31,7 +31,7 @@ exports.addToExpress = function(app) {
 
   apiRouter.post('/account/drawCard', isAuthenticated, controllers.account.drawCard);
 
-  apiRouter.post('/account/register', controllers.account.register);
+  apiRouter.post('/account', controllers.account.register);
 
   apiRouter.post('/account/cardDecompose', isAuthenticated, controllers.account.cardDecompose);
 
@@ -41,7 +41,7 @@ exports.addToExpress = function(app) {
 
   apiRouter.post('/account/cardPartyJoin', isAuthenticated, controllers.account.cardPartyJoin);
 
-  apiRouter.post('/account/login', passport.authenticate('local'), controllers.account.login);
+  apiRouter.post('/auth/local', passport.authenticate('local'), controllers.account.login);
 
   apiRouter.post('/account/logout', isAuthenticated, controllers.account.logout);
 
