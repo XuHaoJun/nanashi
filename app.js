@@ -189,7 +189,7 @@ function createApp(_workerShutdownPromise, options) {
       .incrby('numWorkers', -1)
       .then(function(numWorkers) {
         if (numWorkers !== 0) {
-          quit(resolve);
+          quit.bind(this)(resolve);
           return;
         }
         redisClient
@@ -197,8 +197,8 @@ function createApp(_workerShutdownPromise, options) {
           .del('onlineAccountUsernames')
           .del('onlineAccountIds')
           .exec(function() {
-            quit(resolve);
-          });
+            quit.bind(this)(resolve);
+          }.bind(this));
       });
   }
 
@@ -236,7 +236,7 @@ if (config.cluster.disable === false) {
       if (cluster.isMaster) {
         server.kill(function() {
           logger.info('server:shutdown');
-          Promise.all(_workerShutdownPromise, function() {
+          Promise.all(_workerShutdownPromise).then(function() {
             process.exit(0);
           });
         });
@@ -252,7 +252,7 @@ if (config.cluster.disable === false) {
     function handleShutdown() {
       server.kill(function() {
         logger.info('server:shutdown');
-        Promise.all(_workerShutdownPromise, function() {
+        Promise.all(_workerShutdownPromise).then(function() {
           process.exit(0);
         });
       });
