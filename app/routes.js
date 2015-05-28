@@ -47,6 +47,10 @@ exports.addToExpress = function(app) {
 
   apiRouter.post('/account/cardEffortUpdate', isAuthenticated, controllers.account.cardEffortUpdate);
 
+  apiRouter.get('/battle/noCompletes', isAuthenticated, controllers.battle.noCompletes);
+
+  apiRouter.get('/battle/NPCs', isAuthenticated, controllers.battle.NPCs);
+
   app.use('/api', apiRouter);
 
   app.use('*', redirectToRoot);
