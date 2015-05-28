@@ -59,6 +59,17 @@ function createApp(_workerShutdownPromise, options) {
 
   app.set('port', configs.server.port);
 
+  if (configs.server.forceRedirectToHttps) {
+    app.use(function (req, res, next) {
+      res.setHeader('Strict-Transport-Security', 'max-age=8640000; includeSubDomains');
+      if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] === "http") {
+        return res.redirect(301, 'https://' + req.host + req.url);
+      } else {
+        return next();
+      }
+    });
+  }
+
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: true }));
 

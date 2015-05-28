@@ -2,7 +2,7 @@ var os = require("os");
 var serverConfig = {
   develop: {
     appName: 'nanashi-test',
-    hostname: os.hostname(),
+    forceRedirectToHttps: false,
     cluster: {
       disable: true,
       workers: 2
@@ -12,7 +12,7 @@ var serverConfig = {
   },
   production: {
     appName: 'nanashi',
-    hostname: os.hostname(),
+    forceRedirectToHttps: true,
     cluster: {
       disable: true,
       workers: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2
