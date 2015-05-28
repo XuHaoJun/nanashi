@@ -4,6 +4,38 @@ var models = require('../models');
 var redisClient = models.redisClient;
 var logger = require('../../config/logger');
 
+exports.NPCs = function(req, res) {
+  logger.info({accountId: req.user.accountId,
+               req_id: req.id},
+              'battle:NPCs');
+  var result = models.NPCs.map(function(npc, npcId) {
+    return {id: npc.get('id'), name: npc.get('name')};
+  });
+  res.json(result);
+};
+
+exports.noCompletes = function(req, res) {
+  logger.info({accountId: req.user.accountId,
+               req_id: req.id},
+              'battle:noCompletes');
+  redisClient
+    .hgetBuffer('account:battlePC2NPC1v1', req.user.accountId)
+    .then(function(battle) {
+      var found = (battle !== null);
+      if (found) {
+        battle = msgpack.decode(battle);
+        // TODO
+        // may be delete enemy info.
+        var npcPayload = {battleType: 'battlePC2NPC1v1',
+                          npcName: models.NPCs.get(battle.npcId).get('name'),
+                          npcId: battle.npcId};
+        res.json([npcPayload]);
+        return;
+      }
+      res.json([]);
+    });
+};
+
 function toAccountBattleCardPartyInfo(cardPartyInfo) {
   var bcpi = {
     name: cardPartyInfo.name
@@ -60,10 +92,9 @@ exports.requestNPC = function(io, socket, accountId, payload) {
                         'cardPartyInfo.cardParty.card.baseCard']})
         .then(function(account) {
           var battlePC2NPC1v1 = {
-            num_round: 0,
-            npc_id: payload.npcId,
-            account_id: accountId,
-            diedCards: []
+            numRound: 0,
+            npcId: payload.npcId,
+            accountId: accountId
           };
           var cardPartyInfo = account.related('cardPartyInfo').toJSON();
           var accountBattleCardPartyInfo = toAccountBattleCardPartyInfo(cardPartyInfo[0]);
@@ -209,7 +240,7 @@ exports.useSkillsByPC = function(io, socket, accountId, payload) {
           effectsQueue.push(effect);
         }
       }
-      battle.num_round += 1;
+      battle.numRound += 1;
       var packedBattle = msgpack.encode(battle);
       redisClient
         .hset('account:battlePC2NPC1v1', accountId, packedBattle)

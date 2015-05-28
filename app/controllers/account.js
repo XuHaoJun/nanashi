@@ -70,6 +70,8 @@ exports.register = function(req, res) {
 };
 
 exports.get = function(req, res) {
+  logger.info({accountId: req.user.accountId,
+               req_id: req.id}, 'account:get');
   var accountId = req.user.accountId;
   models.Account.getAll(accountId)
     .then(function(account) {

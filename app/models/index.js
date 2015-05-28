@@ -215,10 +215,10 @@ var BattlePC2NPC1v1 = bookshelf.Model.extend({
   }
 });
 
-var npcs = {
+var NPCs = {
   1: {
     npcId: 1,
-    name: '神奇喵喵',
+    name: '肥嘟嘟冠瑜',
     battleCardPartyInfo:
     {
       name: '神級喵喵隊',
@@ -241,7 +241,7 @@ var npcs = {
   }
 };
 
-npcs = Immutable.fromJS(npcs);
+NPCs = Immutable.fromJS(NPCs);
 
 module.exports = {
   knex: knex,
@@ -253,5 +253,5 @@ module.exports = {
   CardPartyInfo: CardPartyInfo,
   BattlePC2NPC1v1: BattlePC2NPC1v1,
   redisClient: redisClient,
-  NPCs: npcs
+  NPCs: NPCs
 };
