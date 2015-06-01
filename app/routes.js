@@ -111,5 +111,12 @@ exports.addToExpress = function(app) {
 
   app.use('/api', apiRouter);
 
-  app.get('*', _passPathToClient);
+  var clientPaths = ['/', '/login', '/register', '/baseCards',
+                     '/stage', '/cardParty', '/drawCard',
+                     '/battle/:battleType/:id'];
+  var length = clientPaths.length;
+  var i;
+  for(i=0; i<length; i++) {
+    app.get(clientPaths[i], _passPathToClient);
+  }
 };
