@@ -94,7 +94,10 @@ exports.cardDecompose = function(req, res) {
     .then(function(getCry) {
       res.json(getCry);
       logger.info({accountId: accountId, req_id: req.id}, 'cardDecompose');
-    }).catch(logger.info);
+    }).catch(function(err) {
+      logger.info(err);
+      res.status(400).json({error: 'something wrong.'});
+    });
 };
 
 exports.cardLevelUp = function(req, res) {

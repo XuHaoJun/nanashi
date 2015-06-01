@@ -149,7 +149,7 @@ var Account = bookshelf.Model.extend({
             return (
               Account
                 .where({id: accountId})
-                .fetch({transacting: t})
+                .fetch({transacting: t, require: true})
             );
           }).then(function(account) {
             return Account.forge({id: accountId}).save({cry: account.get('cry') + getCry},
@@ -157,8 +157,8 @@ var Account = bookshelf.Model.extend({
           }).then(function(account) {
             return (
               CardParty
-                .where('card_id', cardId)
-                .fetch({transacting: t, require: true})
+                .query({where: {'card_id': cardId}})
+                .fetch({transacting: t})
             );
           }).then(function(cardParty) {
             if (cardParty !== null) {
@@ -168,7 +168,7 @@ var Account = bookshelf.Model.extend({
                   .destroy({transacting: t})
               );
             }
-            return null;
+            return cardParty;
           }).then(function() {
             return Card.forge({id: cardId}).destroy({transacting: t});
           }).then(function() {
