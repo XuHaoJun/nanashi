@@ -20,9 +20,26 @@ function passPathToClient(req, res) {
   res.send(_clientTemplate.render({clientRouterPath: req.path}));
 }
 
+var redisClient = require('./models').redisClient;
+
+function handlePrerenderBeforeRender(req, done) {
+  redisClient.hget('prerender:cache', req.url, done);
+}
+
+function handlePrerenderAfterRender(req, prerenderRes) {
+  redisClient.hset('prerender:cache', req.url, prerenderRes.body);
+}
+
 exports.addToExpress = function(app) {
   if (configs.server.faviconPath) {
     app.use(require('serve-favicon')(configs.server.faviconPath));
+  }
+
+  if (configs.server.prerenderServiceUrl) {
+    app.use(require('prerender-node')
+            .set('prerenderServiceUrl', configs.server.prerenderServiceUrl)
+            .set('beforeRender', handlePrerenderBeforeRender)
+            .set('afterRender', handlePrerenderAfterRender));
   }
 
   if (configs.server.staticDirectory) {

@@ -10,7 +10,8 @@ var serverConfig = {
     port: process.env.PORT || 3000,
     clientTemplate: '../nanashiClient/dist/index.mustache',
     staticDirectory: '../nanashiClient/dist',
-    faviconPath: '../nanashiClient/dist/favicon.ico'
+    faviconPath: '../nanashiClient/dist/favicon.ico',
+    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/'
   },
   production: {
     appName: 'nanashi',
@@ -22,7 +23,8 @@ var serverConfig = {
     port: process.env.PORT || 3000,
     clientTemplate: 'public/index.mustache',
     staticDirectory: 'public',
-    faviconPath: 'public/favicon.ico'
+    faviconPath: 'public/favicon.ico',
+    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/'
   }
 };
 
