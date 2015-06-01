@@ -8,7 +8,9 @@ var serverConfig = {
       workers: 2
     },
     port: process.env.PORT || 3000,
-    staticDirectory: '../nanashiClient/dist'
+    clientTemplate: '../nanashiClient/dist/index.mustache',
+    staticDirectory: '../nanashiClient/dist',
+    faviconPath: '../nanashiClient/dist/favicon.ico'
   },
   production: {
     appName: 'nanashi',
@@ -18,7 +20,9 @@ var serverConfig = {
       workers: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2
     },
     port: process.env.PORT || 3000,
-    staticDirectory: 'public'
+    clientTemplate: 'public/index.mustache',
+    staticDirectory: 'public',
+    faviconPath: 'public/favicon.ico'
   }
 };
 

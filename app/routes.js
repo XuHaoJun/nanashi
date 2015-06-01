@@ -3,12 +3,28 @@ var controllers = require('./controllers');
 var passport = controllers.passport;
 var isAuthenticated = controllers.isAuthenticated;
 var configs = require('../config');
+var Hogan = require('hogan');
 
-function redirectToRoot(req, res) {
+function redirectToHome(req, res) {
   res.redirect('/');
 }
 
+var fs = require('fs');
+
+var _clientTemplate = Hogan.compile(
+  fs.readFileSync(configs.server.clientTemplate, 'utf-8')
+);
+
+function passPathToClient(req, res) {
+  res.contentType('text/html');
+  res.send(_clientTemplate.render({clientRouterPath: req.path}));
+}
+
 exports.addToExpress = function(app) {
+  if (configs.server.faviconPath) {
+    app.use(require('serve-favicon')(configs.server.faviconPath));
+  }
+
   if (configs.server.staticDirectory) {
     app.use('/', express.static(configs.server.staticDirectory));
   }
@@ -16,13 +32,13 @@ exports.addToExpress = function(app) {
   if (configs.oauth2.facebook) {
     app.get('/auth/facebook', passport.authenticate('facebook', { scope: [ 'email' ] }));
 
-    app.get('/auth/facebook/callback', passport.authenticate('facebook'), redirectToRoot);
+    app.get('/auth/facebook/callback', passport.authenticate('facebook'), redirectToHome);
   }
 
   if (configs.oauth2.google) {
     app.get('/auth/google', passport.authenticate('google', { scope: 'https://www.googleapis.com/auth/plus.login' }));
 
-    app.get('/auth/google/callback', passport.authenticate('google'), redirectToRoot);
+    app.get('/auth/google/callback', passport.authenticate('google'), redirectToHome);
   }
 
   var apiRouter = express.Router();
@@ -53,5 +69,5 @@ exports.addToExpress = function(app) {
 
   app.use('/api', apiRouter);
 
-  app.use('*', redirectToRoot);
+  app.get('*', passPathToClient);
 };

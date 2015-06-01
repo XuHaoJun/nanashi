@@ -11,7 +11,7 @@
     },
     "dependencies": {
         "bl": "^0.9.4",
-        "bluebird": "^2.9.26",
+        "bluebird": "^2.9.27",
         "body-parser": "^1.12.4",
         "bookshelf": "^0.8.1",
         "bunyan": "^1.3.5",
@@ -23,6 +23,7 @@
         "express-request-id": "^1.1.0",
         "express-session": "^1.11.2",
         "hiredis": "^0.4.0",
+        "hogan": "^1.0.2",
         "immutable": "^3.7.3",
         "ioredis": "^1.3.6",
         "is_js": "^0.7.4",
@@ -39,6 +40,7 @@
         "pg": "^4.3.0",
         "pg-native": "^1.8.1",
         "redis": "^0.12.1",
+        "serve-favicon": "^2.2.1",
         "socket.io": "^1.3.5",
         "socket.io-redis": "^0.1.4",
         "sticky-session": "git+https://github.com/wzrdtales/sticky-session.git#layer4"
