@@ -15,19 +15,23 @@ var _clientTemplate = Hogan.compile(
   fs.readFileSync(configs.server.clientTemplate, 'utf-8')
 );
 
-function passPathToClient(req, res) {
+function _passPathToClient(req, res) {
   res.contentType('text/html');
   res.send(_clientTemplate.render({clientRouterPath: req.path}));
 }
 
 var redisClient = require('./models').redisClient;
 
-function handlePrerenderBeforeRender(req, done) {
+function _handlePrerenderBeforeRender(req, done) {
   redisClient.hget('prerender:cache', req.url, done);
 }
 
-function handlePrerenderAfterRender(req, prerenderRes) {
+function _handlePrerenderAfterRender(req, prerenderRes) {
   redisClient.hset('prerender:cache', req.url, prerenderRes.body);
+}
+
+function _getGoogleAnalyticsTracking(req, res) {
+  res.json(configs.server.googleAnalyticsTracking);
 }
 
 exports.addToExpress = function(app) {
@@ -45,8 +49,8 @@ exports.addToExpress = function(app) {
     app.use(require('prerender-node')
             .set('prerenderServiceUrl', configs.server.prerenderServiceUrl)
             .set('protocol', 'https')
-            .set('beforeRender', handlePrerenderBeforeRender)
-            .set('afterRender', handlePrerenderAfterRender));
+            .set('beforeRender', _handlePrerenderBeforeRender)
+            .set('afterRender', _handlePrerenderAfterRender));
   }
 
   if (configs.server.staticDirectory) {
@@ -66,6 +70,10 @@ exports.addToExpress = function(app) {
   }
 
   var apiRouter = express.Router();
+
+  if (configs.server.googleAnalyticsTracking) {
+    apiRouter.get('/googleAnalyticsTracking', _getGoogleAnalyticsTracking);
+  }
 
   apiRouter.get('/account', isAuthenticated, controllers.account.get);
 
@@ -95,5 +103,5 @@ exports.addToExpress = function(app) {
 
   app.use('/api', apiRouter);
 
-  app.get('*', passPathToClient);
+  app.get('*', _passPathToClient);
 };
