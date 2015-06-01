@@ -11,7 +11,8 @@ var serverConfig = {
     clientTemplate: '../nanashiClient/dist/index.mustache',
     staticDirectory: '../nanashiClient/dist',
     faviconPath: '../nanashiClient/dist/favicon.ico',
-    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/'
+    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/',
+    googleAnalyticsTracking: process.env.GOOGLE_ANALYTICS_TRACKING || null
   },
   production: {
     appName: 'nanashi',
@@ -24,7 +25,8 @@ var serverConfig = {
     clientTemplate: 'public/index.mustache',
     staticDirectory: 'public',
     faviconPath: 'public/favicon.ico',
-    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/'
+    prerenderServiceUrl: process.env.PRERENDER_SERVICE_URL || 'http://service.prerender.io/',
+    googleAnalyticsTracking: process.env.GOOGLE_ANALYTICS_TRACKING || null
   }
 };
 

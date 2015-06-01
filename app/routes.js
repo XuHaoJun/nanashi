@@ -31,6 +31,12 @@ function handlePrerenderAfterRender(req, prerenderRes) {
 }
 
 exports.addToExpress = function(app) {
+  if (configs.server.googleAnalyticsTracking) {
+    app.use(require("universal-analytics")
+            .middleware(configs.server.googleAnalyticsTracking,
+                        {cookieName: '_ga'}));
+  }
+
   if (configs.server.faviconPath) {
     app.use(require('serve-favicon')(configs.server.faviconPath));
   }
