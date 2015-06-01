@@ -38,6 +38,7 @@ exports.addToExpress = function(app) {
   if (configs.server.prerenderServiceUrl) {
     app.use(require('prerender-node')
             .set('prerenderServiceUrl', configs.server.prerenderServiceUrl)
+            .set('protocol', 'https')
             .set('beforeRender', handlePrerenderBeforeRender)
             .set('afterRender', handlePrerenderAfterRender));
   }
