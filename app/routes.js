@@ -17,7 +17,15 @@ var _clientTemplate = Hogan.compile(
 
 function _passPathToClient(req, res) {
   res.contentType('text/html');
-  res.send(_clientTemplate.render({clientRouterPath: req.path}));
+  res.send(
+    _clientTemplate.render(
+      {clientRouterPath: req.path,
+       hasGoogleAnalyticsTracking: (configs.server.googleAnalyticsTracking ?
+                                    true : false),
+       googleAnalyticsTracking: configs.server.googleAnalyticsTracking
+      }
+    )
+  );
 }
 
 var redisClient = require('./models').redisClient;
