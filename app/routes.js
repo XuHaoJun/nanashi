@@ -67,6 +67,8 @@ exports.addToExpress = function(app) {
 
   apiRouter.get('/battle/NPCs', isAuthenticated, controllers.battle.NPCs);
 
+  apiRouter.get('/baseCards', controllers.baseCards.show);
+
   app.use('/api', apiRouter);
 
   app.get('*', passPathToClient);

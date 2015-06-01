@@ -85,5 +85,6 @@ module.exports = {
   account: require('./account'),
   chat: require('./chat'),
   battle: require('./battle'),
+  baseCards: require('./baseCards'),
   isAuthenticated: isAuthenticated
 };
