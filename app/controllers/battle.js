@@ -123,7 +123,8 @@ function processBattlePC2NPC1v1(accountId, battle, payload, io, socket) {
   var target;
   var effect;
   var card;
-  var skillId;
+  var skillId = 0;
+  var allDied = true;
   for (i = 0; i<length; i++) {
     card = mergedCardParty[i];
     if (card.hp <= 0) {
@@ -142,7 +143,14 @@ function processBattlePC2NPC1v1(accountId, battle, payload, io, socket) {
             targetCardParty[j].round_card_slot_index = j;
           }
         }
-        if (targetCardParty.length === 0) {
+        allDied = true;
+        for (j=0; j<targetCardParty.length; j++) {
+          if (targetCardParty[j].hp > 0) {
+            allDied = false;
+            break;
+          }
+        }
+        if (allDied) {
           socket.emit('battle', {
             action: 'handleComplete',
             battleType: 'battlePC2NPC1v1',
@@ -195,8 +203,14 @@ function processBattlePC2NPC1v1(accountId, battle, payload, io, socket) {
             targetCardParty[j].round_card_slot_index = j;
           }
         }
-        // check win
-        if (targetCardParty.length === 0) {
+        allDied = true;
+        for (j=0; j<targetCardParty.length; j++) {
+          if (targetCardParty[j].hp > 0) {
+            allDied = false;
+            break;
+          }
+        }
+        if (allDied) {
           socket.emit('battle', {
             action: 'handleComplete',
             battleType: 'battlePC2NPC1v1',
