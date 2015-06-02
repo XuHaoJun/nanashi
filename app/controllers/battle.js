@@ -76,8 +76,6 @@ exports.requestNPC = function(io, socket, accountId, payload) {
       var found = (battle !== null);
       if (found) {
         battle = msgpack.decode(battle);
-        // TODO
-        // may be delete enemy info.
         socket.emit('battle',
                     {action: 'initialize',
                      battlePC2NPC1v1: battle
@@ -111,6 +109,140 @@ exports.requestNPC = function(io, socket, accountId, payload) {
     });
 };
 
+function processBattlePC2NPC1v1(accountId, battle, payload, io, socket) {
+  var npcCardParty = battle.npcBattleCardPartyInfo.cardParty;
+  var accountCardParty = battle.accountBattleCardPartyInfo.cardParty;
+  var targetCardParty;
+  var useSkills = payload.prepareUseSkills;
+  var useSkill;
+  var mergedCardParty = _.take(accountCardParty, 3).concat(_.take(npcCardParty, 3));
+  mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
+  var length = mergedCardParty.length;
+  var i, j;
+  var effectsQueue = [];
+  var target;
+  var effect;
+  var card;
+  var skillId;
+  for (i = 0; i<length; i++) {
+    card = mergedCardParty[i];
+    if (card.hp <= 0) {
+      continue;
+    }
+    if (card.round_player === 'NPC') {
+      targetCardParty = accountCardParty;
+      target = _.sample(_.take(targetCardParty, 3));
+      skillId = 1;
+      if (target.hp > 0) {
+        target.hp -= 1;
+      }
+      if (target.hp === 0) {
+        for (j=0; j<targetCardParty.length; j++) {
+          if (targetCardParty[j].hp > 0) {
+            targetCardParty[j].round_card_slot_index = j;
+          }
+        }
+        if (targetCardParty.length === 0) {
+          socket.emit('battle', {
+            action: 'handleComplete',
+            battleType: 'battlePC2NPC1v1',
+            complete: {
+              winer: 'NPC',
+              loser: 'PC'
+            }
+          });
+          redisClient.hdel('account:'+payload.battleType, accountId);
+          return;
+        }
+      }
+      effect = {
+        skillId:skillId,
+        user: {
+          round_player: card.round_player,
+          round_card_slot_index: card.round_card_slot_index
+        },
+        effects: [
+          {
+            hp: {
+              $dec: {
+                value: 1,
+                target: {round_player: target.round_player,
+                         round_card_slot_index: target.round_card_slot_index}
+              }
+            }
+          }
+        ]
+      };
+      effectsQueue.push(effect);
+    } else if(card.round_player === 'PC') {
+      useSkills = payload.prepareUseSkills;
+      useSkill = _.find(useSkills, function(us) {
+        return us.round_card_slot_index == card.round_card_slot_index;
+      });
+      skillId = useSkill.skillId;
+      targetCardParty = (useSkill.target.round_player === 'NPC' ? npcCardParty : accountCardParty);
+      target = targetCardParty[useSkill.target.round_card_slot_index];
+      if (!target) {
+        target = targetCardParty[0];
+      }
+      if (target.hp > 0) {
+        target.hp -= 1;
+      }
+      if (target.hp === 0) {
+        target.round_card_slot_index = -1;
+        for (j=0; j<targetCardParty.length; j++) {
+          if (targetCardParty[j].hp > 0) {
+            targetCardParty[j].round_card_slot_index = j;
+          }
+        }
+        // check win
+        if (targetCardParty.length === 0) {
+          socket.emit('battle', {
+            action: 'handleComplete',
+            battleType: 'battlePC2NPC1v1',
+            complete: {
+              winer: 'PC',
+              loser: 'NPC'
+            }
+          });
+          redisClient.hdel('account:'+payload.battleType, accountId);
+          return;
+        }
+      }
+      effect = {
+        skillId:skillId,
+        user: {
+          round_player: card.round_player,
+          round_card_slot_index: card.round_card_slot_index
+        },
+        effects: [
+          {
+            hp: {
+              $dec: {
+                value: 1,
+                target: {round_player: target.round_player,
+                         round_card_slot_index: target.round_card_slot_index}
+              }
+            }
+          }
+        ]
+      };
+      effectsQueue.push(effect);
+    }
+  }
+  battle.numRound += 1;
+  var packedBattle = msgpack.encode(battle);
+  redisClient
+    .hset('account:battlePC2NPC1v1', accountId, packedBattle)
+    .then(function() {
+      socket.emit('battle', {
+        action: 'handleEffectsQueue',
+        battleType: 'battlePC2NPC1v1',
+        effectsQueue: effectsQueue
+      });
+    });
+}
+
 exports.useSkillsByPC = function(io, socket, accountId, payload) {
   logger.info({req_id: socket.request.id,
                accountId: accountId,
@@ -120,137 +252,17 @@ exports.useSkillsByPC = function(io, socket, accountId, payload) {
     .then(function(battle) {
       var found = (battle !== null);
       if (!found) {
-        // should throw error
+        var resBody = {
+          action: 'initialize'
+        };
+        resBody[payload.battleType] = null;
+        socket.emit('battle', resBody);
         return;
       }
       battle = msgpack.decode(battle);
-      var npcCardParty = battle.npcBattleCardPartyInfo.cardParty;
-      var accountCardParty = battle.accountBattleCardPartyInfo.cardParty;
-      var targetCardParty;
-      var useSkills = payload.prepareUseSkills;
-      var useSkill;
-      var mergedCardParty = _.take(accountCardParty, 3).concat(_.take(npcCardParty, 3));
-      mergedCardParty = _.sortBy(_.shuffle(mergedCardParty), 'spd').reverse();
-      var length = mergedCardParty.length;
-      var i, j;
-      var effectsQueue = [];
-      var target;
-      var effect;
-      var card;
-      var skillId;
-      for (i = 0; i<length; i++) {
-        card = mergedCardParty[i];
-        if (card.hp <= 0) {
-          continue;
-        }
-        if (card.round_player === 'NPC') {
-          targetCardParty = accountCardParty;
-          target = _.sample(_.take(targetCardParty, 3));
-          skillId = 1;
-          target.hp -= 1;
-          if (target.hp === 0) {
-            targetCardParty.splice(target.round_card_slot_index, 1);
-            battle.diedCards.push(target);
-            for (j=0; j<targetCardParty.length; j++) {
-              targetCardParty[j].round_card_slot_index = j;
-            }
-            if (targetCardParty.length === 0) {
-              socket.emit('battle', {
-                action: 'handleComplete',
-                battleType: 'battlePC2NPC1v1',
-                complete: {
-                  winer: 'NPC',
-                  loser: 'PC'
-                }
-              });
-              redisClient.hdel('account:'+payload.battleType, accountId);
-              return;
-            }
-          }
-          effect = {
-            skillId:skillId,
-            user: {
-              round_player: card.round_player,
-              round_card_slot_index: card.round_card_slot_index
-            },
-            effects: [
-              {
-                hp: {
-                  $dec: {
-                    value: 1,
-                    target: {round_player: target.round_player,
-                             round_card_slot_index: target.round_card_slot_index}
-                  }
-                }
-              }
-            ]
-          };
-          effectsQueue.push(effect);
-        } else if(card.round_player === 'PC') {
-          useSkills = payload.prepareUseSkills;
-          useSkill = _.find(useSkills, function(us) {
-            return us.round_card_slot_index == card.round_card_slot_index;
-          });
-          skillId = useSkill.skillId;
-          targetCardParty = (useSkill.target.round_player === 'NPC' ? npcCardParty : accountCardParty);
-          target = targetCardParty[useSkill.target.round_card_slot_index];
-          if (!target) {
-            target = targetCardParty[0];
-          }
-          target.hp -= 1;
-          if (target.hp === 0) {
-            targetCardParty.splice(target.round_card_slot_index, 1);
-            target.round_card_slot_index = -1;
-            battle.diedCards.push(target);
-            for (j=0; j<targetCardParty.length; j++) {
-              targetCardParty[j].round_card_slot_index = j;
-            }
-            // check win
-            if (targetCardParty.length === 0) {
-              socket.emit('battle', {
-                action: 'handleComplete',
-                battleType: 'battlePC2NPC1v1',
-                complete: {
-                  winer: 'PC',
-                  loser: 'NPC'
-                }
-              });
-              redisClient.hdel('account:'+payload.battleType, accountId);
-              return;
-            }
-          }
-          effect = {
-            skillId:skillId,
-            user: {
-              round_player: card.round_player,
-              round_card_slot_index: card.round_card_slot_index
-            },
-            effects: [
-              {
-                hp: {
-                  $dec: {
-                    value: 1,
-                    target: {round_player: target.round_player,
-                             round_card_slot_index: target.round_card_slot_index}
-                  }
-                }
-              }
-            ]
-          };
-          effectsQueue.push(effect);
-        }
+      if (payload.battleType === 'battlePC2NPC1v1') {
+        processBattlePC2NPC1v1(accountId, battle, payload, io, socket);
       }
-      battle.numRound += 1;
-      var packedBattle = msgpack.encode(battle);
-      redisClient
-        .hset('account:battlePC2NPC1v1', accountId, packedBattle)
-        .then(function() {
-          socket.emit('battle', {
-            action: 'handleEffectsQueue',
-            battleType: 'battlePC2NPC1v1',
-            effectsQueue: effectsQueue
-          });
-        });
     });
 };
 

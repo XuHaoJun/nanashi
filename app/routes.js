@@ -42,6 +42,10 @@ function _getGoogleAnalyticsTracking(req, res) {
   res.json(configs.server.googleAnalyticsTracking);
 }
 
+function _getAPIVersion(req, res) {
+  res.json('v1');
+}
+
 exports.addToExpress = function(app) {
   if (configs.server.googleAnalyticsTracking) {
     app.use(require("universal-analytics")
@@ -108,6 +112,8 @@ exports.addToExpress = function(app) {
   apiRouter.get('/battle/NPCs', isAuthenticated, controllers.battle.NPCs);
 
   apiRouter.get('/baseCards', controllers.baseCards.show);
+
+  apiRouter.get('/apiVersion', _getAPIVersion);
 
   app.use('/api', apiRouter);
 

@@ -7,7 +7,7 @@
     },
     "main": "app.js",
     "engines": {
-        "iojs": "2.1.0"
+        "iojs": "2.2.1"
     },
     "dependencies": {
         "bl": "^0.9.4",
