@@ -3,9 +3,11 @@ var serverConfig = {
   develop: {
     appName: 'nanashi-test',
     forceRedirectToHttps: false,
-    cluster: {
-      disable: true,
-      workers: 2
+    stickySession: {
+      enable: false,
+      num: 4,
+      proxy: true,
+      header: 'x-forwarded-for'
     },
     port: process.env.PORT || 3000,
     clientTemplate: '../nanashiClient/dist/index.mustache',
@@ -17,9 +19,11 @@ var serverConfig = {
   production: {
     appName: 'nanashi',
     forceRedirectToHttps: true,
-    cluster: {
-      disable: true,
-      workers: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2
+    stickySession: {
+      enable: false,
+      num: process.env.WORKERS || process.env.WEB_CONCURRENCY || 2,
+      proxy: true,
+      header: 'x-forwarded-for'
     },
     port: process.env.PORT || 3000,
     clientTemplate: 'public/index.mustache',

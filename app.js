@@ -224,40 +224,40 @@ function handleStartServer() {
   logger.info(config, 'server:start');
 }
 
-if (config.cluster.disable === false) {
-  (function() {
+function shutdown(server) {
+  server.kill(function() {
+    logger.info('server:shutdown');
+    Promise.all(_workerShutdownPromise).then(function() {
+      process.exit(0);
+    });
+  });
+}
+
+function handleShutdown(checkMaster, server) {
+  if (checkMaster) {
     var cluster = require('cluster');
-    var workers = config.cluster.workers;
-    var sticky = require('sticky-session');
-    var createAppFunc = createApp.bind(this, _workerShutdownPromise);
-    var server = sticky(workers, createAppFunc).listen(config.port, handleStartServer);
-    killable(server);
-    function handleShutdown() {
-      if (cluster.isMaster) {
-        server.kill(function() {
-          logger.info('server:shutdown');
-          Promise.all(_workerShutdownPromise).then(function() {
-            process.exit(0);
-          });
-        });
-      }
+    if (cluster.isMaster) {
+      shutdown(server);
     }
-    process.on('SIGINT', handleShutdown);
-    process.on('SIGTERM', handleShutdown);
+  } else {
+    shutdown(server);
+  }
+}
+
+if (config.stickySession.enable) {
+  (function() {
+    var sticky = require('socketio-sticky-session');
+    var createAppFunc = createApp.bind(this, _workerShutdownPromise);
+    var server = sticky(config.stickySession, createAppFunc).listen(config.port, handleStartServer);
+    killable(server);
+    process.on('SIGINT', handleShutdown.bind(null, true, server));
+    process.on('SIGTERM', handleShutdown.bind(null, true, server));
   }());
 } else {
   (function() {
     var server = createApp(_workerShutdownPromise).listen(config.port, handleStartServer);
     killable(server);
-    function handleShutdown() {
-      server.kill(function() {
-        logger.info('server:shutdown');
-        Promise.all(_workerShutdownPromise).then(function() {
-          process.exit(0);
-        });
-      });
-    }
-    process.on('SIGINT', handleShutdown);
-    process.on('SIGTERM', handleShutdown);
+    process.on('SIGINT', handleShutdown.bind(null, false, server));
+    process.on('SIGTERM', handleShutdown.bind(null, false, server));
   }());
 }
